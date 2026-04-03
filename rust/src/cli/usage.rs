@@ -163,6 +163,7 @@ fn create_provider(id: ProviderId) -> Box<dyn Provider> {
         ProviderId::JetBrains => Box::new(JetBrainsProvider::new()),
         ProviderId::Alibaba => Box::new(AlibabaProvider::new()),
         ProviderId::NanoGPT => Box::new(NanoGPTProvider::new()),
+        ProviderId::Infini => Box::new(InfiniProvider::default()),
     }
 }
 
