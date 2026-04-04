@@ -20,6 +20,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.12] — 2026-04-04
+
+### Security
+- Harden updater integrity checks with SHA256 digest validation (PR #24)
+- Harden CLI binary resolution against CWD hijacking (PR #26)
+- Harden Kiro CLI path resolution with PATH support and filename validation (PR #25)
+- Verify VC++ runtime signature/checksum before packaging (PR #23)
+
+### Added
+- Add Infini AI Coding Plan provider support with 5-hour/7-day/30-day usage windows (PR #28)
+
+### Fixed
+- Fix Windows CLI visibility - `codexbar.exe usage` now produces output in PowerShell (Issue #22)
+- Fix Claude `.local/bin` path detection for Windows native installs (Issue #22)
+- Fix Claude auto-source error reporting to surface auth errors before CLI timeout (Issue #22)
+- Fix Infini provider `with_base_url()` being ignored in `fetch_usage()` (PR #28 fix)
+- Fix Kiro provider PATH lookup removal that regressed WSL/Linux support (PR #25 fix)
+
+---
+
 ## [1.2.9] — 2026-04-03
 
 ### Changed
