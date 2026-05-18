@@ -9,12 +9,13 @@ use super::{Provider, ProviderId};
 use crate::providers::{
     AbacusProvider, AlibabaProvider, AmpProvider, AntigravityProvider, AugmentProvider,
     BedrockProvider, ClaudeProvider, CodebuffProvider, CodexProvider, CommandCodeProvider,
-    CopilotProvider, CrofProvider, CursorProvider, DeepSeekProvider, DoubaoProvider,
-    FactoryProvider, GeminiProvider, InfiniProvider, JetBrainsProvider, KiloProvider,
-    KimiK2Provider, KimiProvider, KiroProvider, ManusProvider, MiMoProvider, MiniMaxProvider,
-    MistralProvider, NanoGPTProvider, OllamaProvider, OpenAIApiProvider, OpenCodeGoProvider,
-    OpenCodeProvider, OpenRouterProvider, PerplexityProvider, StepFunProvider, SyntheticProvider,
-    VeniceProvider, VertexAIProvider, WarpProvider, WindsurfProvider, ZaiProvider,
+    CopilotProvider, CrofProvider, CursorProvider, DeepSeekProvider, DeepgramProvider,
+    DoubaoProvider, ElevenLabsProvider, FactoryProvider, GeminiProvider, GroqProvider,
+    InfiniProvider, JetBrainsProvider, KiloProvider, KimiK2Provider, KimiProvider, KiroProvider,
+    LLMProxyProvider, ManusProvider, MiMoProvider, MiniMaxProvider, MistralProvider,
+    NanoGPTProvider, OllamaProvider, OpenAIApiProvider, OpenCodeGoProvider, OpenCodeProvider,
+    OpenRouterProvider, PerplexityProvider, StepFunProvider, SyntheticProvider, VeniceProvider,
+    VertexAIProvider, WarpProvider, WindsurfProvider, ZaiProvider,
 };
 
 /// Instantiate the concrete [`Provider`] implementation for a given [`ProviderId`].
@@ -64,6 +65,10 @@ pub fn instantiate(id: ProviderId) -> Box<dyn Provider> {
         ProviderId::StepFun => Box::new(StepFunProvider::new()),
         ProviderId::Venice => Box::new(VeniceProvider::new()),
         ProviderId::OpenAIApi => Box::new(OpenAIApiProvider::new()),
+        ProviderId::ElevenLabs => Box::new(ElevenLabsProvider::new()),
+        ProviderId::Deepgram => Box::new(DeepgramProvider::new()),
+        ProviderId::Groq => Box::new(GroqProvider::new()),
+        ProviderId::LLMProxy => Box::new(LLMProxyProvider::new()),
     }
 }
 

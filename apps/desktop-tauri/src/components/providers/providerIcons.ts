@@ -11,13 +11,17 @@ import codebuff from "./icons/ProviderIcon-codebuff.svg?raw";
 import codex from "./icons/ProviderIcon-codex.svg?raw";
 import copilot from "./icons/ProviderIcon-copilot.svg?raw";
 import cursor from "./icons/ProviderIcon-cursor.svg?raw";
+import deepgram from "./icons/ProviderIcon-deepgram.svg?raw";
 import deepseek from "./icons/ProviderIcon-deepseek.svg?raw";
+import elevenlabs from "./icons/ProviderIcon-elevenlabs.svg?raw";
 import factory from "./icons/ProviderIcon-factory.svg?raw";
 import gemini from "./icons/ProviderIcon-gemini.svg?raw";
+import groq from "./icons/ProviderIcon-groq.svg?raw";
 import jetbrains from "./icons/ProviderIcon-jetbrains.svg?raw";
 import kilo from "./icons/ProviderIcon-kilo.svg?raw";
 import kimi from "./icons/ProviderIcon-kimi.svg?raw";
 import kiro from "./icons/ProviderIcon-kiro.svg?raw";
+import llmproxy from "./icons/ProviderIcon-llmproxy.svg?raw";
 import minimax from "./icons/ProviderIcon-minimax.svg?raw";
 import mistral from "./icons/ProviderIcon-mistral.svg?raw";
 import ollama from "./icons/ProviderIcon-ollama.svg?raw";
@@ -65,13 +69,17 @@ const RAW: Record<string, string> = {
   codex: tint(codex),
   copilot: tint(copilot),
   cursor: tint(cursor),
+  deepgram: tint(deepgram),
   deepseek: tint(deepseek),
+  elevenlabs: tint(elevenlabs),
   factory: tint(factory),
   gemini: tint(gemini),
+  groq: tint(groq),
   jetbrains: tint(jetbrains),
   kilo: tint(kilo),
   kimi: tint(kimi),
   kiro: tint(kiro),
+  llmproxy: tint(llmproxy),
   minimax: tint(minimax),
   mistral: tint(mistral),
   ollama: tint(ollama),
@@ -101,15 +109,19 @@ export const PROVIDER_ICON_REGISTRY: Record<string, ProviderIcon> = {
   codex:       { id: "codex",       brandColor: "#49a3b0", fallbackLetter: "◆", svgPath: RAW.codex },
   copilot:     { id: "copilot",     brandColor: "#a855f7", fallbackLetter: "⬡", svgPath: RAW.copilot },
   cursor:      { id: "cursor",      brandColor: "#00bfa5", fallbackLetter: "▸", svgPath: RAW.cursor },
+  deepgram:    { id: "deepgram",    brandColor: "#13ef93", fallbackLetter: "D", svgPath: RAW.deepgram },
   deepseek:    { id: "deepseek",    brandColor: "#527df0", fallbackLetter: "D", svgPath: RAW.deepseek },
+  elevenlabs:  { id: "elevenlabs",  brandColor: "#111827", fallbackLetter: "E", svgPath: RAW.elevenlabs },
   factory:     { id: "factory",     brandColor: "#ff6b35", fallbackLetter: "◎", svgPath: RAW.factory },
   gemini:      { id: "gemini",      brandColor: "#ab87ea", fallbackLetter: "✦", svgPath: RAW.gemini },
+  groq:        { id: "groq",        brandColor: "#f55036", fallbackLetter: "G", svgPath: RAW.groq },
   jetbrains:   { id: "jetbrains",   brandColor: "#ff3399", fallbackLetter: "J", svgPath: RAW.jetbrains },
   kilo:        { id: "kilo",        brandColor: "#5d87ff", fallbackLetter: "K", svgPath: RAW.kilo },
   bedrock:     { id: "bedrock",     brandColor: "#ff9900", fallbackLetter: "B" },
   kimi:        { id: "kimi",        brandColor: "#fe603c", fallbackLetter: "☽", svgPath: RAW.kimi },
   kimik2:      { id: "kimik2",      brandColor: "#4c00ff", fallbackLetter: "☽", svgPath: RAW.kimi },
   kiro:        { id: "kiro",        brandColor: "#ff9900", fallbackLetter: "K", svgPath: RAW.kiro },
+  llmproxy:    { id: "llmproxy",    brandColor: "#4f46e5", fallbackLetter: "L", svgPath: RAW.llmproxy },
   minimax:     { id: "minimax",     brandColor: "#fe603c", fallbackLetter: "M", svgPath: RAW.minimax },
   mistral:     { id: "mistral",     brandColor: "#ff500f", fallbackLetter: "M", svgPath: RAW.mistral },
   ollama:      { id: "ollama",      brandColor: "#8b95b0", fallbackLetter: "○", svgPath: RAW.ollama },
@@ -163,6 +175,15 @@ const ALIASES: Record<string, string> = {
   "step-fun": "stepfun",
   "openai api": "openaiapi",
   "openai-api": "openaiapi",
+  "eleven labs": "elevenlabs",
+  "eleven-labs": "elevenlabs",
+  "11labs": "elevenlabs",
+  dg: "deepgram",
+  groqcloud: "groq",
+  "groq cloud": "groq",
+  "groq-cloud": "groq",
+  "llm proxy": "llmproxy",
+  "llm-proxy": "llmproxy",
 };
 
 function normalize(id: string): string {

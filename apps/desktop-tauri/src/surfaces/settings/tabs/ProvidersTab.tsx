@@ -185,6 +185,10 @@ function providerSourceHintShort(
     case "stepfun":
     case "venice":
     case "openaiapi":
+    case "elevenlabs":
+    case "deepgram":
+    case "groq":
+    case "llmproxy":
       return t("ProviderSourceApiShort");
     case "kiro":
       return t("ProviderSourceKiroEnvShort");

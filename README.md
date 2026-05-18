@@ -14,7 +14,7 @@ The Windows port of [CodexBar](https://github.com/steipete/CodexBar) — a syste
 
 ## Features
 
-- **41 AI providers** — Codex, Claude, Cursor, Factory, Gemini, Copilot, Antigravity, z.ai, MiniMax, Kiro, Vertex AI, Augment, OpenCode, Kimi, Kimi K2, Amp, Warp, Ollama, OpenRouter, Synthetic, JetBrains AI, Alibaba, NanoGPT, Infini, Perplexity, Abacus AI, Mistral, OpenCode Go, Kilo, AWS Bedrock, Codebuff, DeepSeek, Windsurf, Manus, Xiaomi MiMo, Doubao, Command Code, Crof, StepFun, Venice, OpenAI API
+- **45 AI providers** — Codex, Claude, Cursor, Factory, Gemini, Copilot, Antigravity, z.ai, MiniMax, Kiro, Vertex AI, Augment, OpenCode, Kimi, Kimi K2, Amp, Warp, Ollama, OpenRouter, Synthetic, JetBrains AI, Alibaba, NanoGPT, Infini, Perplexity, Abacus AI, Mistral, OpenCode Go, Kilo, AWS Bedrock, Codebuff, DeepSeek, Windsurf, Manus, Xiaomi MiMo, Doubao, Command Code, Crof, StepFun, Venice, OpenAI API, ElevenLabs, Deepgram, Groq, LLM Proxy
 - **System tray icon** — dynamic two-bar meter showing session + weekly usage
 - **Floating Bar** — optional always-on-top transparent capacity strip with orientation, opacity, and click-through controls
 - **Browser cookie import** — Chrome, Edge, Brave, Firefox, with browser access kept opt-in
@@ -24,12 +24,12 @@ The Windows port of [CodexBar](https://github.com/steipete/CodexBar) — a syste
 - **CLI** — `codexbar usage` and `codexbar cost` for scripting and CI
 - **WSL support** — CLI works out of the box; desktop shell via WSLg
 
-## What's New in v0.26.3
+## What's New in v0.27.0
 
-- Fixed DeepSeek refresh in the desktop app when an API key is configured.
-- API-key providers now stay on the automatic API source path instead of falling back to unsupported CLI mode.
-- Startup diagnostics no longer write raw CLI argument values to temp logs.
-- Launch logs now use per-process filenames so concurrent CLI runs do not overwrite each other.
+- Ported upstream CodexBar 0.27 API quota providers for ElevenLabs, Deepgram, GroqCloud metrics, and LLM Proxy quota-stats.
+- Added provider icons, chart colors, Settings API-key setup, CLI aliases, dashboard/status links, and Rust parser coverage for the new providers.
+- Added CLI config helpers: `codexbar config providers`, `enable`, `disable`, and `set-api-key`.
+- Kept provider refresh on the real API source path for API-key providers in the Windows/Tauri shell.
 
 ## Quick Start
 

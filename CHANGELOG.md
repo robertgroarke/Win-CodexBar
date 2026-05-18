@@ -4,6 +4,18 @@
 
 ---
 
+## [Windows] 0.27.0 - 2026-05-19
+
+### Added
+- Port upstream CodexBar 0.27 API quota providers for ElevenLabs subscription credits, Deepgram project usage, GroqCloud Enterprise Prometheus metrics, and LLM Proxy quota-stats.
+- Add the v0.27 provider wiring across the Rust registry, Settings API-key catalog, Tauri provider icons, chart colors, dashboard/status links, and frontend provider unions.
+- Add `codexbar config providers`, `codexbar config enable`, `codexbar config disable`, and `codexbar config set-api-key` for scriptable provider setup.
+
+### Fixed
+- Keep API-key provider refreshes on the Windows/Tauri API source path and add deterministic parser coverage for the new providers.
+
+---
+
 ## [Windows] 0.26.3 - 2026-05-17
 
 ### Fixed

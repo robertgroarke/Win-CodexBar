@@ -70,7 +70,11 @@ export type ProofProviderId =
   | "crof"
   | "stepfun"
   | "venice"
-  | "openaiapi";
+  | "openaiapi"
+  | "elevenlabs"
+  | "deepgram"
+  | "groq"
+  | "llmproxy";
 
 export type TrayPanelSurfaceTarget = { kind: "summary" };
 export type PopOutSurfaceTarget =

@@ -4,8 +4,8 @@
 
 use clap::{Parser, Subcommand};
 
-use crate::core::TokenAccountStore;
-use crate::settings::{ManualCookies, Settings};
+use crate::core::{ProviderId, TokenAccountStore, instantiate_provider};
+use crate::settings::{ApiKeys, ManualCookies, Settings};
 
 /// Arguments for the config command
 #[derive(Parser, Debug)]
@@ -24,6 +24,32 @@ pub enum ConfigCommand {
         #[arg(short, long, default_value = "json")]
         format: String,
     },
+    /// List providers and enabled state
+    Providers,
+    /// Enable a provider
+    Enable {
+        /// Provider CLI name or alias
+        provider: String,
+    },
+    /// Disable a provider
+    Disable {
+        /// Provider CLI name or alias
+        provider: String,
+    },
+    /// Store an API key for a provider
+    SetApiKey {
+        /// Provider CLI name or alias
+        provider: String,
+        /// API key to store
+        #[arg(long = "api-key")]
+        api_key: Option<String>,
+        /// Read API key from stdin
+        #[arg(long)]
+        stdin: bool,
+        /// Store the key without enabling the provider
+        #[arg(long = "no-enable")]
+        no_enable: bool,
+    },
     /// Show configuration file paths
     Path,
 }
@@ -33,6 +59,15 @@ pub async fn run(args: ConfigArgs) -> anyhow::Result<()> {
     match args.command {
         ConfigCommand::Validate => validate_config().await,
         ConfigCommand::Dump { format } => dump_config(&format).await,
+        ConfigCommand::Providers => list_providers().await,
+        ConfigCommand::Enable { provider } => set_provider_enabled(&provider, true).await,
+        ConfigCommand::Disable { provider } => set_provider_enabled(&provider, false).await,
+        ConfigCommand::SetApiKey {
+            provider,
+            api_key,
+            stdin,
+            no_enable,
+        } => set_api_key(&provider, api_key.as_deref(), stdin, !no_enable).await,
         ConfigCommand::Path => show_paths().await,
     }
 }
@@ -153,6 +188,124 @@ async fn dump_config(format: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// List provider enabled state.
+async fn list_providers() -> anyhow::Result<()> {
+    let settings = Settings::load();
+    for id in ProviderId::all() {
+        let state = if settings.is_provider_enabled(*id) {
+            "enabled"
+        } else {
+            "disabled"
+        };
+        let default_marker = if instantiate_provider(*id).metadata().default_enabled {
+            " default"
+        } else {
+            ""
+        };
+        println!(
+            "{}: {}{} ({})",
+            id.cli_name(),
+            state,
+            default_marker,
+            id.display_name()
+        );
+    }
+    Ok(())
+}
+
+/// Enable or disable a provider by CLI name.
+async fn set_provider_enabled(provider: &str, enabled: bool) -> anyhow::Result<()> {
+    let id = parse_provider(provider)?;
+    let mut settings = Settings::load();
+    if enabled {
+        settings.enable_provider(id);
+    } else {
+        settings.disable_provider(id);
+    }
+    settings.save()?;
+    let state = if enabled { "enabled" } else { "disabled" };
+    println!("Config: {state} {}", id.display_name());
+    Ok(())
+}
+
+/// Store an API key and optionally enable the provider.
+async fn set_api_key(
+    provider: &str,
+    api_key: Option<&str>,
+    read_from_stdin: bool,
+    enable_provider: bool,
+) -> anyhow::Result<()> {
+    let id = parse_provider(provider)?;
+    ensure_provider_accepts_api_key(id)?;
+    let api_key = resolve_api_key_input(api_key, read_from_stdin)?;
+
+    let mut keys = ApiKeys::load();
+    keys.set(id.cli_name(), &api_key, None);
+    keys.save()?;
+
+    if enable_provider {
+        let mut settings = Settings::load();
+        settings.enable_provider(id);
+        settings.save()?;
+    }
+
+    let suffix = if enable_provider { " and enabled" } else { "" };
+    println!("Config: stored API key for {}{suffix}", id.display_name());
+    Ok(())
+}
+
+fn parse_provider(raw: &str) -> anyhow::Result<ProviderId> {
+    ProviderId::from_cli_name(raw).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Unknown provider '{}'. Run `codexbar config providers` to list providers.",
+            raw
+        )
+    })
+}
+
+fn ensure_provider_accepts_api_key(id: ProviderId) -> anyhow::Result<()> {
+    if crate::settings::get_api_key_providers()
+        .iter()
+        .any(|provider| provider.id == id)
+    {
+        return Ok(());
+    }
+    anyhow::bail!("{} does not support stored API keys.", id.display_name())
+}
+
+fn resolve_api_key_input(api_key: Option<&str>, read_from_stdin: bool) -> anyhow::Result<String> {
+    if api_key.is_some() && read_from_stdin {
+        anyhow::bail!("Use either --api-key or --stdin, not both.");
+    }
+
+    let raw = if read_from_stdin {
+        let mut buffer = String::new();
+        use std::io::Read;
+        std::io::stdin().read_to_string(&mut buffer)?;
+        Some(buffer)
+    } else {
+        api_key.map(ToString::to_string)
+    };
+
+    let mut value = raw
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Missing API key. Pass --api-key <key> or use --stdin."))?;
+
+    if (value.starts_with('"') && value.ends_with('"'))
+        || (value.starts_with('\'') && value.ends_with('\''))
+    {
+        value.remove(0);
+        value.pop();
+    }
+
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        anyhow::bail!("Missing API key. Pass --api-key <key> or use --stdin.");
+    }
+    Ok(value)
 }
 
 /// Show configuration file paths

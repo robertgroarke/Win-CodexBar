@@ -14,7 +14,7 @@
 
 ## 功能特性
 
-- **41 个 AI 服务商** — Codex、Claude、Cursor、Factory、Gemini、Copilot、Antigravity、z.ai、MiniMax、Kiro、Vertex AI、Augment、OpenCode、Kimi、Kimi K2、Amp、Warp、Ollama、OpenRouter、Synthetic、JetBrains AI、Alibaba、NanoGPT、Infini、Perplexity、Abacus AI、Mistral、OpenCode Go、Kilo、AWS Bedrock、Codebuff、DeepSeek、Windsurf、Manus、小米 MiMo、Doubao、Command Code、Crof、StepFun、Venice、OpenAI API
+- **45 个 AI 服务商** — Codex、Claude、Cursor、Factory、Gemini、Copilot、Antigravity、z.ai、MiniMax、Kiro、Vertex AI、Augment、OpenCode、Kimi、Kimi K2、Amp、Warp、Ollama、OpenRouter、Synthetic、JetBrains AI、Alibaba、NanoGPT、Infini、Perplexity、Abacus AI、Mistral、OpenCode Go、Kilo、AWS Bedrock、Codebuff、DeepSeek、Windsurf、Manus、小米 MiMo、Doubao、Command Code、Crof、StepFun、Venice、OpenAI API、ElevenLabs、Deepgram、Groq、LLM Proxy
 - **系统托盘图标** — 动态双条进度显示会话与周用量
 - **Floating Bar** — 可选的置顶透明用量条，支持方向、透明度和点击穿透控制
 - **浏览器 Cookie 导入** — Chrome、Edge、Brave、Firefox（Windows DPAPI 解密）
@@ -24,12 +24,12 @@
 - **CLI** — `codexbar usage` 和 `codexbar cost`，便于脚本化和 CI
 - **WSL 支持** — CLI 开箱即用，桌面壳层通过 WSLg 运行
 
-## v0.26.3 更新内容
+## v0.27.0 更新内容
 
-- 修复 DeepSeek 在桌面端配置 API Key 后刷新失败的问题。
-- API Key 类服务商现在会保持自动 API 数据源，不再错误回退到不支持的 CLI 模式。
-- 启动诊断日志不再把原始 CLI 参数值写入临时日志。
-- 启动日志改为每个进程单独文件，避免并发 CLI 运行时互相覆盖。
+- 移植上游 CodexBar 0.27 的 API 配额服务商：ElevenLabs、Deepgram、GroqCloud metrics 和 LLM Proxy quota-stats。
+- 为新服务商补齐图标、图表颜色、设置页 API Key 配置、CLI 别名、Dashboard/Status 链接和 Rust 解析测试。
+- 新增 CLI 配置命令：`codexbar config providers`、`enable`、`disable`、`set-api-key`。
+- Windows/Tauri 桌面端继续让 API Key 类服务商走真实 API 数据源刷新。
 
 ## 快速开始
 

@@ -52,6 +52,10 @@ pub enum ProviderId {
     StepFun,
     Venice,
     OpenAIApi,
+    ElevenLabs,
+    Deepgram,
+    Groq,
+    LLMProxy,
 }
 
 impl ProviderId {
@@ -99,6 +103,10 @@ impl ProviderId {
             ProviderId::StepFun,
             ProviderId::Venice,
             ProviderId::OpenAIApi,
+            ProviderId::ElevenLabs,
+            ProviderId::Deepgram,
+            ProviderId::Groq,
+            ProviderId::LLMProxy,
         ]
     }
 
@@ -146,6 +154,10 @@ impl ProviderId {
             ProviderId::StepFun => "stepfun",
             ProviderId::Venice => "venice",
             ProviderId::OpenAIApi => "openaiapi",
+            ProviderId::ElevenLabs => "elevenlabs",
+            ProviderId::Deepgram => "deepgram",
+            ProviderId::Groq => "groq",
+            ProviderId::LLMProxy => "llmproxy",
         }
     }
 
@@ -193,6 +205,10 @@ impl ProviderId {
             ProviderId::StepFun => "StepFun",
             ProviderId::Venice => "Venice",
             ProviderId::OpenAIApi => "OpenAI API",
+            ProviderId::ElevenLabs => "ElevenLabs",
+            ProviderId::Deepgram => "Deepgram",
+            ProviderId::Groq => "Groq",
+            ProviderId::LLMProxy => "LLM Proxy",
         }
     }
 
@@ -243,6 +259,10 @@ impl ProviderId {
             ProviderId::StepFun => None,
             ProviderId::Venice => None,
             ProviderId::OpenAIApi => None,
+            ProviderId::ElevenLabs => None,
+            ProviderId::Deepgram => None,
+            ProviderId::Groq => None,
+            ProviderId::LLMProxy => None,
         }
     }
 
@@ -296,6 +316,10 @@ impl ProviderId {
             "openaiapi" | "openai-api" | "openai api" | "openai-balance" => {
                 Some(ProviderId::OpenAIApi)
             }
+            "elevenlabs" | "eleven-labs" | "11labs" => Some(ProviderId::ElevenLabs),
+            "deepgram" | "dg" => Some(ProviderId::Deepgram),
+            "groq" | "groqcloud" | "groq-cloud" | "groq cloud" => Some(ProviderId::Groq),
+            "llmproxy" | "llm-proxy" | "llm proxy" => Some(ProviderId::LLMProxy),
             _ => None,
         }
     }
@@ -493,6 +517,12 @@ pub fn cli_name_map() -> HashMap<&'static str, ProviderId> {
     map.insert("step-fun", ProviderId::StepFun);
     map.insert("openai-api", ProviderId::OpenAIApi);
     map.insert("openai-balance", ProviderId::OpenAIApi);
+    map.insert("eleven-labs", ProviderId::ElevenLabs);
+    map.insert("11labs", ProviderId::ElevenLabs);
+    map.insert("dg", ProviderId::Deepgram);
+    map.insert("groqcloud", ProviderId::Groq);
+    map.insert("groq-cloud", ProviderId::Groq);
+    map.insert("llm-proxy", ProviderId::LLMProxy);
     map
 }
 
@@ -503,7 +533,7 @@ mod tests {
     #[test]
     fn test_provider_id_all() {
         let all = ProviderId::all();
-        assert_eq!(all.len(), 41);
+        assert_eq!(all.len(), 45);
         assert!(all.contains(&ProviderId::Claude));
         assert!(all.contains(&ProviderId::Codex));
         assert!(all.contains(&ProviderId::Kimi));
@@ -525,6 +555,10 @@ mod tests {
         assert!(all.contains(&ProviderId::StepFun));
         assert!(all.contains(&ProviderId::Venice));
         assert!(all.contains(&ProviderId::OpenAIApi));
+        assert!(all.contains(&ProviderId::ElevenLabs));
+        assert!(all.contains(&ProviderId::Deepgram));
+        assert!(all.contains(&ProviderId::Groq));
+        assert!(all.contains(&ProviderId::LLMProxy));
     }
 
     #[test]

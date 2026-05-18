@@ -42,6 +42,13 @@ const PROVIDER_TOKEN: Record<string, string> = {
   "deep seek": "--chart-deepseek",
   windsurf: "--chart-windsurf",
   codeium: "--chart-windsurf",
+  elevenlabs: "--chart-elevenlabs",
+  "eleven labs": "--chart-elevenlabs",
+  deepgram: "--chart-deepgram",
+  groq: "--chart-groq",
+  groqcloud: "--chart-groq",
+  llmproxy: "--chart-llmproxy",
+  "llm proxy": "--chart-llmproxy",
 };
 
 /** CSS color expression for a provider's cost-series bars. */

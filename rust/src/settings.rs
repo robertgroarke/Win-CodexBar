@@ -1854,6 +1854,42 @@ pub fn get_api_key_providers() -> Vec<ProviderConfigInfo> {
             config_file_path: None,
             dashboard_url: Some("https://platform.openai.com/usage"),
         },
+        ProviderConfigInfo {
+            id: ProviderId::ElevenLabs,
+            name: "ElevenLabs",
+            requires_api_key: true,
+            api_key_env_var: Some("ELEVENLABS_API_KEY"),
+            api_key_help: Some("Get your API key from ElevenLabs Settings > API Keys."),
+            config_file_path: None,
+            dashboard_url: Some("https://elevenlabs.io/app/settings/api-keys"),
+        },
+        ProviderConfigInfo {
+            id: ProviderId::Deepgram,
+            name: "Deepgram",
+            requires_api_key: true,
+            api_key_env_var: Some("DEEPGRAM_API_KEY"),
+            api_key_help: Some("Use a Deepgram API key with Management API access."),
+            config_file_path: None,
+            dashboard_url: Some("https://console.deepgram.com/usage"),
+        },
+        ProviderConfigInfo {
+            id: ProviderId::Groq,
+            name: "Groq",
+            requires_api_key: true,
+            api_key_env_var: Some("GROQ_API_KEY"),
+            api_key_help: Some("Groq metrics require Enterprise Prometheus metrics access."),
+            config_file_path: None,
+            dashboard_url: Some("https://console.groq.com/settings/metrics"),
+        },
+        ProviderConfigInfo {
+            id: ProviderId::LLMProxy,
+            name: "LLM Proxy",
+            requires_api_key: true,
+            api_key_env_var: Some("LLM_PROXY_API_KEY + LLM_PROXY_BASE_URL"),
+            api_key_help: Some("Set an LLM Proxy API key and base URL for quota-stats."),
+            config_file_path: None,
+            dashboard_url: None,
+        },
     ]
 }
 
@@ -2016,6 +2052,10 @@ mod tests {
             ProviderId::Bedrock,
             ProviderId::Codebuff,
             ProviderId::DeepSeek,
+            ProviderId::ElevenLabs,
+            ProviderId::Deepgram,
+            ProviderId::Groq,
+            ProviderId::LLMProxy,
         ] {
             assert!(
                 providers.iter().any(|provider| provider.id == id),

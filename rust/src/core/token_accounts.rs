@@ -184,7 +184,11 @@ impl TokenAccountSupport {
             | ProviderId::Crof
             | ProviderId::StepFun
             | ProviderId::Venice
-            | ProviderId::OpenAIApi => None,
+            | ProviderId::OpenAIApi
+            | ProviderId::ElevenLabs
+            | ProviderId::Deepgram
+            | ProviderId::Groq
+            | ProviderId::LLMProxy => None,
         }
     }
 

@@ -126,6 +126,10 @@
   --chart-codebuff: rgb(68, 255, 0);
   --chart-deepseek: rgb(82, 125, 240);
   --chart-windsurf: rgb(34, 197, 94);
+  --chart-elevenlabs: rgb(17, 24, 39);
+  --chart-deepgram: rgb(19, 239, 147);
+  --chart-groq: rgb(245, 80, 54);
+  --chart-llmproxy: rgb(79, 70, 229);
 
   /* Default cost/credits series colors (match egui credits teal). */
   --chart-cost: rgb(93, 135, 255);
