@@ -475,6 +475,7 @@ export const ALL_LOCALE_KEYS = [
   "TokenAccountSetActive",
   "TokenAccountRemove",
   "TokenAccountAddButton",
+  "TokenAccountGithubLoginButton",
   "TokenAccountEmpty",
   "TokenAccountLabelPlaceholder",
   "TokenAccountProviderLabel",

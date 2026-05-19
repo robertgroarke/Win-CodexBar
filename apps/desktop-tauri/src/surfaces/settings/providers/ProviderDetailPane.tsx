@@ -211,6 +211,9 @@ export function ProviderDetailPane({
     setBusy(true);
     try {
       await triggerProviderLogin(detail.id);
+      setCredentialRevision((value) => value + 1);
+      await refreshProviders();
+      await load(detail.id);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -298,6 +301,13 @@ export function ProviderDetailPane({
         busy={busy}
         onRevoke={handleRevokeCredentials}
       />
+      {tokenProviderIds.has(detail.id) && (
+        <TokenAccountsPanel
+          key={`token-${detail.id}-${credentialRevision}`}
+          providerId={detail.id}
+          compact
+        />
+      )}
       <ApiKeySection
         key={`api-${detail.id}-${credentialRevision}`}
         providerId={detail.id}
@@ -307,13 +317,6 @@ export function ProviderDetailPane({
         providerId={detail.id}
         cookieDomain={cookieDomain}
       />
-      {tokenProviderIds.has(detail.id) && (
-        <TokenAccountsPanel
-          key={`token-${detail.id}-${credentialRevision}`}
-          providerId={detail.id}
-          compact
-        />
-      )}
       <ChartsSection
         providerId={detail.id}
         accountEmail={detail.email}

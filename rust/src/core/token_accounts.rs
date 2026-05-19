@@ -157,11 +157,20 @@ impl TokenAccountSupport {
                 requires_manual_cookie_source: true,
                 cookie_name: Some("__Secure-better-auth.session_token"),
             }),
+            ProviderId::Copilot => Some(TokenAccountSupport {
+                title: "GitHub accounts",
+                subtitle: "Store GitHub OAuth tokens for Copilot plan usage.",
+                placeholder: "Sign in with GitHub or paste a GitHub OAuth token...",
+                injection: TokenInjection::Environment {
+                    key: "GITHUB_TOKEN".to_string(),
+                },
+                requires_manual_cookie_source: false,
+                cookie_name: None,
+            }),
             // These providers don't support token accounts
             ProviderId::Codex
             | ProviderId::Gemini
             | ProviderId::Antigravity
-            | ProviderId::Copilot
             | ProviderId::Kiro
             | ProviderId::VertexAI
             | ProviderId::Kimi
@@ -577,6 +586,7 @@ mod tests {
     fn test_token_account_support() {
         assert!(TokenAccountSupport::is_supported(ProviderId::Claude));
         assert!(TokenAccountSupport::is_supported(ProviderId::Cursor));
+        assert!(TokenAccountSupport::is_supported(ProviderId::Copilot));
         assert!(!TokenAccountSupport::is_supported(ProviderId::Codex));
         assert!(!TokenAccountSupport::is_supported(ProviderId::Gemini));
     }

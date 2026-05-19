@@ -26,8 +26,8 @@ impl CopilotProvider {
             metadata: ProviderMetadata {
                 id: ProviderId::Copilot,
                 display_name: "GitHub Copilot",
-                session_label: "Monthly",
-                weekly_label: "Monthly",
+                session_label: "Premium",
+                weekly_label: "Chat",
                 supports_opus: false,
                 supports_credits: false,
                 default_enabled: true,
@@ -57,7 +57,7 @@ impl Provider for CopilotProvider {
     }
 
     async fn fetch_usage(&self, ctx: &FetchContext) -> Result<ProviderFetchResult, ProviderError> {
-        tracing::debug!("Fetching GitHub Copilot usage via API");
+        tracing::debug!("Fetching GitHub Copilot usage via GitHub OAuth");
 
         match self.api.fetch_usage(ctx.api_key.as_deref()).await {
             Ok(usage) => Ok(ProviderFetchResult::new(usage, "oauth")),

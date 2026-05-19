@@ -172,7 +172,7 @@ function providerSourceHintShort(
     case "jetbrains":
       return t("ProviderSourceCliShort");
     case "copilot":
-      return t("ProviderSourceGithubApiShort");
+      return t("ProviderSourceOauthShort");
     case "zai":
     case "vertexai":
     case "openrouter":

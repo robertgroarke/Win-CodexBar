@@ -4,6 +4,18 @@
 
 ---
 
+## [Windows] 0.27.2 - 2026-05-20
+
+### Added
+- Add GitHub device-code sign-in for Copilot in the Tauri provider settings, storing the OAuth token as a protected Copilot token account.
+- Reuse `gh auth token` as a Copilot auth fallback so existing GitHub CLI logins can power Copilot usage without pasting a token.
+
+### Fixed
+- Parse Copilot plan usage across paid `premium_interactions` / `chat` snapshots and free-plan `monthly_quotas` / `limited_user_quotas` responses.
+- Show Copilot as OAuth-backed in the Providers UI while keeping the legacy manual token path as an optional fallback.
+
+---
+
 ## [Windows] 0.27.1 - 2026-05-19
 
 ### Added

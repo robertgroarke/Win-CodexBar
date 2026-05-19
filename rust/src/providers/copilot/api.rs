@@ -1,12 +1,18 @@
-//! GitHub Copilot API client for fetching usage information
+//! GitHub Copilot API client for fetching usage information.
 //!
-//! Uses GitHub OAuth token stored in Windows Credential Manager
+//! Uses a GitHub OAuth token for GitHub's Copilot usage endpoint. The primary
+//! path is app-managed device OAuth/token accounts; legacy API key and Windows
+//! Credential Manager tokens remain supported as fallbacks.
 
 use crate::core::{ProviderError, RateWindow, UsageSnapshot};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use serde_json::{Map, Value};
+use std::process::Command;
 
-const API_URL: &str = "https://api.github.com/copilot_internal/user";
+const DEFAULT_GITHUB_HOST: &str = "github.com";
+const COPILOT_USAGE_PATH: &str = "/copilot_internal/user";
+const GITHUB_USER_PATH: &str = "/user";
 
 // Credential Manager targets to try
 const CREDENTIAL_TARGETS: &[&str] = &[
@@ -15,14 +21,21 @@ const CREDENTIAL_TARGETS: &[&str] = &[
     "github.com",             // Alternative format
 ];
 
-/// Copilot API client
+/// Basic GitHub identity for labeling OAuth token accounts.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubIdentity {
+    pub login: String,
+    pub id: Option<u64>,
+    pub name: Option<String>,
+}
+
+/// Copilot API client.
 pub struct CopilotApi {
     client: reqwest::Client,
 }
 
 impl CopilotApi {
     pub fn new() -> Self {
-        // Build client with proper settings to avoid "builder error"
         let client = reqwest::Client::builder()
             .use_rustls_tls()
             .timeout(std::time::Duration::from_secs(30))
@@ -32,16 +45,35 @@ impl CopilotApi {
         Self { client }
     }
 
-    /// Fetch usage information from Copilot API
+    /// Fetch usage information from the default GitHub host.
     pub async fn fetch_usage(&self, api_key: Option<&str>) -> Result<UsageSnapshot, ProviderError> {
-        // Load token from provided api_key or credential store
-        let token = self.load_token(api_key)?;
+        self.fetch_usage_for_host(api_key, None).await
+    }
 
-        // Build request with required headers
+    /// Fetch usage information from Copilot API, optionally targeting an
+    /// enterprise GitHub host. `github.com` maps to `api.github.com`; an
+    /// enterprise host maps to `api.<host>` unless it already starts with
+    /// `api.`.
+    pub async fn fetch_usage_for_host(
+        &self,
+        api_key: Option<&str>,
+        github_host: Option<&str>,
+    ) -> Result<UsageSnapshot, ProviderError> {
+        let token = self.load_token(api_key, github_host)?;
+        self.fetch_usage_with_token(&token, github_host).await
+    }
+
+    /// Fetch usage with an already-resolved OAuth token.
+    pub async fn fetch_usage_with_token(
+        &self,
+        token: &str,
+        github_host: Option<&str>,
+    ) -> Result<UsageSnapshot, ProviderError> {
+        let api_url = copilot_usage_url(github_host);
         let response = self
             .client
-            .get(API_URL)
-            .header("Authorization", format!("token {}", token))
+            .get(api_url)
+            .header("Authorization", format!("token {}", token.trim()))
             .header("Accept", "application/json")
             .header("Editor-Version", "vscode/1.96.2")
             .header("Editor-Plugin-Version", "copilot-chat/0.26.7")
@@ -57,7 +89,7 @@ impl CopilotApi {
 
         if !response.status().is_success() {
             return Err(ProviderError::Other(format!(
-                "GitHub Copilot API returned {}",
+                "GitHub Copilot usage endpoint returned {}",
                 response.status()
             )));
         }
@@ -67,43 +99,70 @@ impl CopilotApi {
             .await
             .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
-        self.build_snapshot(usage_response)
+        snapshot_from_response(usage_response)
     }
 
-    fn load_token(&self, api_key: Option<&str>) -> Result<String, ProviderError> {
-        // Check api_key first (from settings/ctx)
-        if let Some(key) = api_key
-            && !key.is_empty()
-            && key.chars().all(|c| c.is_ascii_graphic())
-        {
-            tracing::debug!("Using Copilot token from settings");
-            return Ok(key.to_string());
+    /// Fetch GitHub identity for labeling a stored device-OAuth token.
+    pub async fn fetch_identity_with_token(
+        &self,
+        token: &str,
+        github_host: Option<&str>,
+    ) -> Result<GitHubIdentity, ProviderError> {
+        let url = github_api_url(github_host, GITHUB_USER_PATH);
+        let response = self
+            .client
+            .get(url)
+            .header("Authorization", format!("token {}", token.trim()))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "Win-CodexBar")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+            .map_err(|e| ProviderError::Other(format!("Request failed: {}", e)))?;
+
+        if response.status() == 401 || response.status() == 403 {
+            return Err(ProviderError::AuthRequired);
         }
 
-        // Try each credential target as fallback
-        for target in CREDENTIAL_TARGETS {
-            if let Some(token) = self.try_load_credential(target) {
-                // Git Credential Manager stores as "username:password" or just password
-                // Extract just the password/token part
-                let trimmed = token.trim();
-                let actual_token = if let Some((_user, pass)) = trimmed.split_once(':') {
-                    // Format is "username:token" - take the token part
-                    pass.trim()
-                } else {
-                    trimmed
-                };
+        if !response.status().is_success() {
+            return Err(ProviderError::Other(format!(
+                "GitHub identity endpoint returned {}",
+                response.status()
+            )));
+        }
 
-                // Validate token - must be non-empty and contain only valid characters
-                if !actual_token.is_empty() && actual_token.chars().all(|c| c.is_ascii_graphic()) {
-                    tracing::debug!("Found Copilot token in credential target: {}", target);
-                    return Ok(actual_token.to_string());
-                }
+        response
+            .json()
+            .await
+            .map_err(|e| ProviderError::Parse(e.to_string()))
+    }
+
+    fn load_token(
+        &self,
+        api_key: Option<&str>,
+        github_host: Option<&str>,
+    ) -> Result<String, ProviderError> {
+        if let Some(key) = normalize_token(api_key) {
+            tracing::debug!("Using Copilot token from settings or active token account");
+            return Ok(key);
+        }
+
+        if let Some(token) = load_gh_cli_token(github_host) {
+            tracing::debug!("Using Copilot token from GitHub CLI auth");
+            return Ok(token);
+        }
+
+        for target in CREDENTIAL_TARGETS {
+            if let Some(token) = self.try_load_credential(target)
+                && let Some(actual_token) = normalize_token(Some(&token))
+            {
+                tracing::debug!("Found Copilot token in credential target: {}", target);
+                return Ok(actual_token);
             }
         }
 
-        // If no token found, return error with instructions
         Err(ProviderError::NotInstalled(
-            "GitHub token not found. Store a GitHub Personal Access Token in Windows Credential Manager with target 'codexbar-copilot'.".to_string()
+            "GitHub Copilot token not found. Sign in with GitHub from Copilot settings, run 'gh auth login', or add a legacy GitHub token.".to_string(),
         ))
     }
 
@@ -163,49 +222,6 @@ impl CopilotApi {
     fn try_load_credential(&self, _target: &str) -> Option<String> {
         None
     }
-
-    fn build_snapshot(
-        &self,
-        response: CopilotUsageResponse,
-    ) -> Result<UsageSnapshot, ProviderError> {
-        // Build primary rate window from premium_interactions
-        let primary = response
-            .quota_snapshots
-            .premium_interactions
-            .as_ref()
-            .map(|snapshot| {
-                let used_percent = (100.0 - snapshot.percent_remaining).max(0.0);
-                RateWindow::with_details(
-                    used_percent,
-                    None, // Window not provided
-                    parse_iso_date(&response.quota_reset_date),
-                    None,
-                )
-            })
-            .unwrap_or_else(|| RateWindow::new(0.0));
-
-        // Build secondary rate window from chat
-        let secondary = response.quota_snapshots.chat.as_ref().map(|snapshot| {
-            let used_percent = (100.0 - snapshot.percent_remaining).max(0.0);
-            RateWindow::with_details(
-                used_percent,
-                None,
-                parse_iso_date(&response.quota_reset_date),
-                None,
-            )
-        });
-
-        // Format plan type
-        let plan_type = format!("Copilot {}", capitalize(&response.copilot_plan));
-
-        let mut usage = UsageSnapshot::new(primary);
-        if let Some(sec) = secondary {
-            usage = usage.with_secondary(sec);
-        }
-        usage = usage.with_login_method(plan_type);
-
-        Ok(usage)
-    }
 }
 
 impl Default for CopilotApi {
@@ -218,35 +234,321 @@ impl Default for CopilotApi {
 
 #[derive(Debug, Deserialize)]
 struct CopilotUsageResponse {
+    #[serde(default)]
     quota_snapshots: QuotaSnapshots,
+    #[serde(default)]
+    monthly_quotas: QuotaCounts,
+    #[serde(default)]
+    limited_user_quotas: QuotaCounts,
+    #[serde(default = "unknown_plan")]
     copilot_plan: String,
-    assigned_date: String,
-    quota_reset_date: String,
+    #[serde(default)]
+    quota_reset_date: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(transparent)]
 struct QuotaSnapshots {
-    premium_interactions: Option<QuotaSnapshot>,
-    chat: Option<QuotaSnapshot>,
+    entries: Map<String, Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+struct QuotaCounts {
+    #[serde(default, deserialize_with = "deserialize_optional_f64")]
+    completions: Option<f64>,
+    #[serde(default, deserialize_with = "deserialize_optional_f64")]
+    chat: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 struct QuotaSnapshot {
-    entitlement: f64,
-    remaining: f64,
+    #[serde(default, deserialize_with = "deserialize_optional_f64")]
+    entitlement: Option<f64>,
+    #[serde(default, deserialize_with = "deserialize_optional_f64")]
+    remaining: Option<f64>,
+    #[serde(default, deserialize_with = "deserialize_optional_f64")]
+    percent_remaining: Option<f64>,
+    #[serde(default)]
+    quota_id: Option<String>,
+    #[serde(default)]
+    placeholder: bool,
+}
+
+// --- Snapshot building ---
+
+fn snapshot_from_response(response: CopilotUsageResponse) -> Result<UsageSnapshot, ProviderError> {
+    let reset = response
+        .quota_reset_date
+        .as_deref()
+        .and_then(parse_iso_date);
+    let quotas = response.usable_quotas();
+
+    let primary_quota = quotas.premium.or_else(|| quotas.first.clone());
+    let primary = primary_quota
+        .as_ref()
+        .map(|quota| quota.to_rate_window(reset))
+        .unwrap_or_else(|| RateWindow::new(0.0));
+
+    let mut usage =
+        UsageSnapshot::new(primary).with_login_method(plan_label(&response.copilot_plan));
+
+    if let Some(chat) = quotas.chat
+        && primary_quota
+            .as_ref()
+            .is_none_or(|primary| primary.kind != CopilotQuotaKind::Chat)
+    {
+        usage = usage.with_secondary(chat.to_rate_window(reset));
+    }
+
+    if let Some(completions) = quotas.completions
+        && primary_quota
+            .as_ref()
+            .is_some_and(|primary| primary.kind != completions.kind)
+    {
+        usage = usage.with_extra_rate_window(
+            "completions",
+            "Completions",
+            completions.to_rate_window(reset),
+        );
+    }
+
+    Ok(usage)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopilotQuotaKind {
+    Premium,
+    Chat,
+    Completions,
+    Other,
+}
+
+#[derive(Debug, Clone)]
+struct UsableQuota {
+    kind: CopilotQuotaKind,
     percent_remaining: f64,
-    quota_id: String,
+}
+
+impl UsableQuota {
+    fn from_snapshot(key: &str, snapshot: QuotaSnapshot) -> Option<Self> {
+        if snapshot.is_placeholder() {
+            return None;
+        }
+
+        let percent_remaining = snapshot.percent_remaining.or_else(|| {
+            let entitlement = snapshot.entitlement?;
+            let remaining = snapshot.remaining?;
+            if entitlement > 0.0 {
+                Some((remaining / entitlement * 100.0).clamp(0.0, 100.0))
+            } else {
+                None
+            }
+        })?;
+
+        let quota_id = snapshot.quota_id.as_deref().unwrap_or_default();
+        let key = key.to_ascii_lowercase();
+        let id = quota_id.to_ascii_lowercase();
+        let kind = if key.contains("chat") || id.contains("chat") {
+            CopilotQuotaKind::Chat
+        } else if key.contains("completion") || id.contains("completion") {
+            CopilotQuotaKind::Completions
+        } else if key.contains("premium") || id.contains("premium") || id.contains("interaction") {
+            CopilotQuotaKind::Premium
+        } else {
+            CopilotQuotaKind::Other
+        };
+
+        Some(Self {
+            kind,
+            percent_remaining,
+        })
+    }
+
+    fn from_limited(
+        kind: CopilotQuotaKind,
+        entitlement: Option<f64>,
+        remaining: Option<f64>,
+    ) -> Option<Self> {
+        let entitlement = entitlement?;
+        let remaining = remaining?;
+        if entitlement <= 0.0 {
+            return None;
+        }
+
+        Some(Self {
+            kind,
+            percent_remaining: (remaining / entitlement * 100.0).clamp(0.0, 100.0),
+        })
+    }
+
+    fn to_rate_window(&self, reset: Option<DateTime<Utc>>) -> RateWindow {
+        RateWindow::with_details((100.0 - self.percent_remaining).max(0.0), None, reset, None)
+    }
+}
+
+#[derive(Default)]
+struct UsableQuotas {
+    premium: Option<UsableQuota>,
+    chat: Option<UsableQuota>,
+    completions: Option<UsableQuota>,
+    first: Option<UsableQuota>,
+}
+
+impl CopilotUsageResponse {
+    fn usable_quotas(&self) -> UsableQuotas {
+        let mut quotas = UsableQuotas::default();
+
+        for (key, value) in &self.quota_snapshots.entries {
+            let Ok(snapshot) = serde_json::from_value::<QuotaSnapshot>(value.clone()) else {
+                continue;
+            };
+            let Some(quota) = UsableQuota::from_snapshot(key, snapshot) else {
+                continue;
+            };
+
+            if quotas.first.is_none() {
+                quotas.first = Some(quota.clone());
+            }
+
+            match quota.kind {
+                CopilotQuotaKind::Premium => {
+                    if quotas.premium.is_none() {
+                        quotas.premium = Some(quota);
+                    }
+                }
+                CopilotQuotaKind::Chat => {
+                    if quotas.chat.is_none() {
+                        quotas.chat = Some(quota);
+                    }
+                }
+                CopilotQuotaKind::Completions => {
+                    if quotas.completions.is_none() {
+                        quotas.completions = Some(quota);
+                    }
+                }
+                CopilotQuotaKind::Other => {}
+            }
+        }
+
+        let completions = UsableQuota::from_limited(
+            CopilotQuotaKind::Completions,
+            self.monthly_quotas.completions,
+            self.limited_user_quotas.completions,
+        );
+        if quotas.completions.is_none() {
+            quotas.completions = completions.clone();
+        }
+        if quotas.premium.is_none() {
+            quotas.premium = completions;
+        }
+
+        let chat = UsableQuota::from_limited(
+            CopilotQuotaKind::Chat,
+            self.monthly_quotas.chat,
+            self.limited_user_quotas.chat,
+        );
+        if quotas.chat.is_none() {
+            quotas.chat = chat;
+        }
+
+        if quotas.first.is_none() {
+            quotas.first = quotas
+                .premium
+                .clone()
+                .or_else(|| quotas.chat.clone())
+                .or_else(|| quotas.completions.clone());
+        }
+
+        quotas
+    }
+}
+
+impl QuotaSnapshot {
+    fn is_placeholder(&self) -> bool {
+        self.placeholder
+            || self.entitlement.unwrap_or_default() == 0.0
+                && self.remaining.unwrap_or_default() == 0.0
+                && self.percent_remaining.unwrap_or_default() == 0.0
+                && self.quota_id.as_deref().unwrap_or_default().is_empty()
+    }
 }
 
 // --- Helper functions ---
 
+fn github_api_url(github_host: Option<&str>, path: &str) -> String {
+    let host = normalized_api_host(github_host);
+    format!("https://{host}{path}")
+}
+
+fn copilot_usage_url(github_host: Option<&str>) -> String {
+    github_api_url(github_host, COPILOT_USAGE_PATH)
+}
+
+fn normalized_api_host(github_host: Option<&str>) -> String {
+    let host = github_host
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .unwrap_or(DEFAULT_GITHUB_HOST)
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_ascii_lowercase();
+
+    if host == DEFAULT_GITHUB_HOST || host == "api.github.com" {
+        "api.github.com".to_string()
+    } else if host.starts_with("api.") {
+        host
+    } else {
+        format!("api.{host}")
+    }
+}
+
+fn normalize_token(raw: Option<&str>) -> Option<String> {
+    let trimmed = raw?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let token = if let Some((_user, pass)) = trimmed.split_once(':') {
+        pass.trim()
+    } else if trimmed.to_ascii_lowercase().starts_with("bearer ") {
+        trimmed[7..].trim()
+    } else if trimmed.to_ascii_lowercase().starts_with("token ") {
+        trimmed[6..].trim()
+    } else {
+        trimmed
+    };
+
+    if !token.is_empty() && token.chars().all(|c| c.is_ascii_graphic()) {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
+fn load_gh_cli_token(github_host: Option<&str>) -> Option<String> {
+    let host = github_host
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .unwrap_or(DEFAULT_GITHUB_HOST);
+    let output = Command::new("gh")
+        .args(["auth", "token", "--hostname", host])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let token = String::from_utf8(output.stdout).ok()?;
+    normalize_token(Some(&token))
+}
+
 fn parse_iso_date(s: &str) -> Option<DateTime<Utc>> {
-    // Try RFC3339 first
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Some(dt.with_timezone(&Utc));
     }
 
-    // Try without timezone
     if let Ok(dt) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         return Some(DateTime::from_naive_utc_and_offset(
             dt.and_hms_opt(0, 0, 0)?,
@@ -257,10 +559,150 @@ fn parse_iso_date(s: &str) -> Option<DateTime<Utc>> {
     None
 }
 
+fn plan_label(plan: &str) -> String {
+    let plan = plan.trim();
+    if plan.is_empty() || plan.eq_ignore_ascii_case("unknown") {
+        "GitHub Copilot".to_string()
+    } else {
+        format!("Copilot {}", capitalize(plan))
+    }
+}
+
 fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         None => String::new(),
         Some(first) => first.to_uppercase().chain(chars).collect(),
+    }
+}
+
+fn unknown_plan() -> String {
+    "unknown".to_string()
+}
+
+fn deserialize_optional_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_snapshot(json: &str) -> UsageSnapshot {
+        let response: CopilotUsageResponse = serde_json::from_str(json).unwrap();
+        snapshot_from_response(response).unwrap()
+    }
+
+    #[test]
+    fn paid_plan_parses_premium_and_chat_quotas() {
+        let usage = parse_snapshot(
+            r#"{
+                "copilot_plan": "pro",
+                "quota_reset_date": "2026-06-01",
+                "quota_snapshots": {
+                    "premium_interactions": {
+                        "entitlement": 300,
+                        "remaining": 240,
+                        "percent_remaining": 80,
+                        "quota_id": "premium_interactions"
+                    },
+                    "chat": {
+                        "entitlement": 1000,
+                        "remaining": 900,
+                        "percent_remaining": 90,
+                        "quota_id": "chat"
+                    }
+                }
+            }"#,
+        );
+
+        assert_eq!(usage.login_method.as_deref(), Some("Copilot Pro"));
+        assert!((usage.primary.used_percent - 20.0).abs() < 0.001);
+        assert!((usage.secondary.unwrap().used_percent - 10.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn limited_user_quotas_parse_free_schema() {
+        let usage = parse_snapshot(
+            r#"{
+                "copilot_plan": "free",
+                "monthly_quotas": {
+                    "completions": 2000,
+                    "chat": "50"
+                },
+                "limited_user_quotas": {
+                    "completions": "1000",
+                    "chat": 10
+                }
+            }"#,
+        );
+
+        assert_eq!(usage.login_method.as_deref(), Some("Copilot Free"));
+        assert!((usage.primary.used_percent - 50.0).abs() < 0.001);
+        assert!((usage.secondary.unwrap().used_percent - 80.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn derives_missing_percent_and_accepts_numeric_strings() {
+        let usage = parse_snapshot(
+            r#"{
+                "quota_snapshots": {
+                    "premium_interactions": {
+                        "entitlement": "100",
+                        "remaining": "25",
+                        "quota_id": "premium_interactions"
+                    }
+                }
+            }"#,
+        );
+
+        assert!((usage.primary.used_percent - 75.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn ignores_placeholders_and_does_not_promote_chat_to_premium() {
+        let usage = parse_snapshot(
+            r#"{
+                "quota_snapshots": {
+                    "premium_interactions": {
+                        "percent_remaining": 0,
+                        "quota_id": ""
+                    },
+                    "chat": {
+                        "entitlement": 100,
+                        "remaining": 75,
+                        "percent_remaining": 75,
+                        "quota_id": "chat"
+                    }
+                }
+            }"#,
+        );
+
+        assert!((usage.primary.used_percent - 25.0).abs() < 0.001);
+        assert!(usage.secondary.is_none());
+    }
+
+    #[test]
+    fn normalizes_enterprise_hosts() {
+        assert_eq!(
+            normalized_api_host(Some("github.com")),
+            "api.github.com".to_string()
+        );
+        assert_eq!(
+            normalized_api_host(Some("github.example.com")),
+            "api.github.example.com".to_string()
+        );
+        assert_eq!(
+            normalized_api_host(Some("api.github.example.com")),
+            "api.github.example.com".to_string()
+        );
     }
 }

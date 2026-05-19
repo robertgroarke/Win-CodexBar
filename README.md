@@ -24,12 +24,12 @@ The Windows port of [CodexBar](https://github.com/steipete/CodexBar) — a syste
 - **CLI** — `codexbar usage`, `codexbar cost`, `codexbar config`, and loopback `codexbar serve` for scripting and local integrations
 - **WSL support** — CLI works out of the box; desktop shell via WSLg
 
-## What's New in v0.27.1
+## What's New in v0.27.2
 
-- Completes the upstream CodexBar 0.27 provider port for Windows/Tauri instead of only shipping the API-key quota subset.
-- Adds Grok support with browser-cookie and `~/.grok/auth.json` billing detection, plus Settings/provider icon/chart wiring.
-- Adds Claude Admin API usage, OpenAI Admin API usage with credit-balance fallback, MiniMax billing summaries, OpenCode Go Zen balance display, and Kiro overage usage/cost parsing.
-- Adds `codexbar serve` for loopback JSON access to `/health`, `/usage`, and `/cost`, plus the upstream-compatible `--all-accounts` CLI flag surface.
+- Adds GitHub device-code sign-in for Copilot directly from the Providers settings pane.
+- Stores Copilot OAuth tokens as protected token accounts, with `gh auth token` and legacy manual token support kept as fallbacks.
+- Fixes Copilot plan usage parsing for paid Premium/Chat quota snapshots and free-plan monthly quota responses.
+- Shows Copilot as OAuth-backed in the provider list instead of making manual API-key setup look like the primary path.
 
 ## Quick Start
 
@@ -90,7 +90,7 @@ codexbar cost  -p codex           # local cost from JSONL logs
 | Cursor | Cookies | Plan, Usage, Billing |
 | Factory | Cookies | Usage |
 | Gemini | gcloud OAuth | Quota |
-| Copilot | GitHub Device Flow | Usage |
+| Copilot | GitHub Device Flow / gh CLI / legacy token | Plan usage, Chat |
 | Antigravity | Cookies / LSP | Usage |
 | z.ai | API Token | Quota |
 | MiniMax | API / Cookies | Usage, Billing Summary |

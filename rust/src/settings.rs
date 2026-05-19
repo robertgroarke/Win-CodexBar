@@ -1715,10 +1715,12 @@ pub fn get_api_key_providers() -> Vec<ProviderConfigInfo> {
         },
         ProviderConfigInfo {
             id: ProviderId::Copilot,
-            name: "GitHub Copilot",
+            name: "GitHub Copilot (legacy token)",
             requires_api_key: true,
             api_key_env_var: Some("GITHUB_TOKEN"),
-            api_key_help: Some("GitHub Personal Access Token with copilot scope"),
+            api_key_help: Some(
+                "Optional fallback. Prefer Providers → Copilot → Sign in with GitHub.",
+            ),
             config_file_path: None,
             dashboard_url: Some("https://github.com/settings/copilot"),
         },

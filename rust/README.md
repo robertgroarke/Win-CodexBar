@@ -140,7 +140,7 @@ Each provider has different authentication methods:
 | Codex | Local CLI, Browser cookies |
 | Cursor | Browser cookies |
 | Gemini | gcloud CLI credentials |
-| Copilot | GitHub device flow |
+| Copilot | GitHub device flow, gh CLI auth, legacy token fallback |
 | Antigravity | Local language server |
 | Windsurf | Local cache |
 | Zai | Local config |
