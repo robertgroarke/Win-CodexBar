@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build --no-bundle",
+    "tauri:build:windows-cross": "PATH=\"/opt/homebrew/opt/lld/bin:/opt/homebrew/opt/llvm/bin:$PATH\" tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --no-bundle",
     "tauri:build:debug": "tauri build --debug --no-bundle"
   },
   "dependencies": {
