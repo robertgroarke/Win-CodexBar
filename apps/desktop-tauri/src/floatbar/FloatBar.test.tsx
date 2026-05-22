@@ -103,6 +103,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarOrientation: "horizontal",
     floatBarClickThrough: false,
     floatBarProviderIds: [],
+    floatBarDarkText: false,
     ...overrides,
   };
 }

@@ -20,6 +20,21 @@ import "./FloatBar.css";
  * high-usage threshold, red when remaining is below the critical threshold
  * or the provider is exhausted.
  */
+function formatResetIn(resetsAt: string | null): string | null {
+  if (!resetsAt) return null;
+  const target = Date.parse(resetsAt);
+  if (Number.isNaN(target)) return null;
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) return "due now";
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
 function ProviderPill({
   provider,
   highRemaining,
@@ -37,11 +52,17 @@ function ProviderPill({
 
   const brand = getProviderIcon(provider.providerId).brandColor;
   const label = provider.error ? "—" : `${Math.round(remaining)}%`;
+  const resetIn = formatResetIn(provider.primary.resetsAt);
+  const resetSuffix = resetIn
+    ? `\nResets in ${resetIn}`
+    : provider.primary.resetDescription
+      ? `\nResets ${provider.primary.resetDescription}`
+      : "";
 
   return (
     <div
       className={`floatbar__pill floatbar__pill--${tone}`}
-      title={`${provider.displayName}: ${label} remaining`}
+      title={`${provider.displayName}: ${label} remaining${resetSuffix}`}
       style={{ "--brand": brand } as React.CSSProperties}
     >
       <ProviderIcon providerId={provider.providerId} size={11} />
@@ -129,11 +150,13 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
 
   const highRemaining = 100 - settings.highUsageThreshold;
   const critRemaining = 100 - settings.criticalUsageThreshold;
+  const opacityFraction = Math.max(0.3, Math.min(1, settings.floatBarOpacity / 100));
 
   return (
     <div
-      className={`floatbar floatbar--${orientation}`}
+      className={`floatbar floatbar--${orientation}${settings.floatBarDarkText ? " floatbar--light-bg" : ""}`}
       data-tauri-drag-region
+      style={{ opacity: opacityFraction }}
     >
       <div className="floatbar__handle" data-tauri-drag-region aria-hidden />
       {visible.length === 0 ? (

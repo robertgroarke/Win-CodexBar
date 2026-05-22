@@ -65,6 +65,7 @@ pub fn show(
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)
+        .transparent(true)
         .background_color(tauri::utils::config::Color(0, 0, 0, 0))
         .visible(false)
         .build()

@@ -96,6 +96,7 @@ pub struct SettingsPatch {
     pub orientation: Option<String>,
     pub click_through: Option<bool>,
     pub provider_ids: Option<Vec<String>>,
+    pub dark_text: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -105,6 +106,7 @@ impl SettingsPatch {
             && self.orientation.is_none()
             && self.click_through.is_none()
             && self.provider_ids.is_none()
+            && self.dark_text.is_none()
     }
 
     /// Apply this patch to a mutable `Settings`. Values are clamped and
@@ -124,6 +126,9 @@ impl SettingsPatch {
         }
         if let Some(v) = &self.provider_ids {
             settings.float_bar_provider_ids = v.clone();
+        }
+        if let Some(v) = self.dark_text {
+            settings.float_bar_dark_text = v;
         }
     }
 }
