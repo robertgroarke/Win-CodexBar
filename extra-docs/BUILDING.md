@@ -61,6 +61,19 @@ It builds from a clean managed checkout but keeps Cargo output, the pnpm store,
 and signed installer bootstrapper downloads in `C:\code\Win-CodexBar-release\cache`.
 Release assets land in `C:\code\Win-CodexBar-release\assets`.
 
+Useful release flags:
+
+```powershell
+.\scripts\windows-release-build.ps1 -Ref v0.27.5 -WarmCacheOnly
+.\scripts\windows-release-build.ps1 -Ref v0.27.5 -WarmCliCache
+.\scripts\windows-release-build.ps1 -Ref v0.27.5 -SmokeInstall
+.\scripts\windows-release-build.ps1 -Ref v0.27.5 -UploadRelease v0.27.5
+.\scripts\release-doctor.ps1 -Version 0.27.5
+```
+
+GitHub Actions are optional for this repository. The Windows server release
+script is the primary path for installer and portable artifacts.
+
 ## Project Structure
 
 ```

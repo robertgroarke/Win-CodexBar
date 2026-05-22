@@ -54,8 +54,12 @@ For the Inno Setup release artifact, prefer the cached Windows release builder:
 ```
 
 It keeps a clean managed checkout while reusing Cargo, pnpm, and signed
-installer dependency caches. Run the smoke installer test on a Windows machine
-before upload or publication:
+installer dependency caches. Use `-WarmCacheOnly` after large ports to prepare
+the desktop cache without packaging, `-WarmCliCache` to warm CLI artifacts in a
+separate target cache, `-SmokeInstall` to install/uninstall the generated
+installer, and `-UploadRelease vX.Y.Z` to upload assets directly to GitHub.
+Run the standalone smoke installer test on a Windows machine before manual
+upload or publication:
 
 ```powershell
 powershell -ExecutionPolicy Bypass `
@@ -145,6 +149,8 @@ Tick each entry as it is verified on the Windows target.
 [ ] build.pnpm-test               pnpm run test
 [ ] build.pnpm-build              pnpm run build
 [ ] build.tauri-bundle            pnpm run tauri:build (msi + nsis)
+[ ] release.cached-build          .\scripts\windows-release-build.ps1 -Ref <tag>
+[ ] release.doctor                .\scripts\release-doctor.ps1 -Version <version>
 
 [ ] runtime.tray-icon-visible
 [ ] runtime.tray-left-click-popout

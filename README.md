@@ -75,6 +75,18 @@ For local release builds on a Windows server, use the cached release builder:
 
 The script keeps a clean managed checkout under `C:\code\Win-CodexBar-release\source`, stores Rust build output in `C:\code\Win-CodexBar-release\cache\cargo-target`, stores pnpm packages in `C:\code\Win-CodexBar-release\cache\pnpm-store`, and reuses signed WebView2/VC++ bootstrapper downloads. It still builds the real release binary, verifies Microsoft signatures for installer dependencies, packages with Inno Setup, and writes the same four GitHub release assets under `C:\code\Win-CodexBar-release\assets`.
 
+Useful release flags:
+
+```powershell
+.\scripts\windows-release-build.ps1 -Ref v0.27.5 -WarmCacheOnly
+.\scripts\windows-release-build.ps1 -Ref v0.27.5 -WarmCliCache
+.\scripts\windows-release-build.ps1 -Ref v0.27.5 -SmokeInstall
+.\scripts\windows-release-build.ps1 -Ref v0.27.5 -UploadRelease v0.27.5
+.\scripts\release-doctor.ps1 -Version 0.27.5
+```
+
+GitHub Actions are best-effort only for this project. The Windows server script is the primary release path for installer and portable artifacts.
+
 ## First Run
 
 1. Launch CodexBar — it sits in the system tray

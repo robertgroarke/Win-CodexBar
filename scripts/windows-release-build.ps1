@@ -25,15 +25,38 @@
     Re-download WebView2 and VC++ bootstrapper files instead of reusing the
     signed cached copies.
 
+.PARAMETER WarmCacheOnly
+    Build the desktop binary and stop before installer packaging. Use this to
+    warm the Windows Cargo and pnpm caches after a large port.
+
+.PARAMETER WarmCliCache
+    Also build the CLI in a separate Cargo target cache. This keeps CLI warming
+    from invalidating or competing with desktop release artifacts.
+
+.PARAMETER SmokeInstall
+    After packaging, run scripts/windows-smoke-install.ps1 against the generated
+    installer and uninstall it again.
+
+.PARAMETER UploadRelease
+    GitHub release tag to upload assets to after packaging, for example v0.27.5.
+    Requires the GitHub CLI to be installed and authenticated.
+
 .EXAMPLE
     .\scripts\windows-release-build.ps1 -Ref v0.27.4
+
+.EXAMPLE
+    .\scripts\windows-release-build.ps1 -Ref v0.27.5 -SmokeInstall -UploadRelease v0.27.5
 #>
 
 param(
     [string]$Ref = "HEAD",
     [string]$RepoUrl = "https://github.com/Finesssee/Win-CodexBar.git",
     [string]$WorkRoot = "C:\code\Win-CodexBar-release",
-    [switch]$RefreshInstallerDependencies
+    [switch]$RefreshInstallerDependencies,
+    [switch]$WarmCacheOnly,
+    [switch]$WarmCliCache,
+    [switch]$SmokeInstall,
+    [string]$UploadRelease = ""
 )
 
 Set-StrictMode -Version Latest
@@ -41,10 +64,11 @@ $ErrorActionPreference = "Stop"
 
 $SourceDir = Join-Path $WorkRoot "source"
 $CacheDir = Join-Path $WorkRoot "cache"
-$CargoTargetDir = Join-Path $CacheDir "cargo-target"
 $PnpmStoreDir = Join-Path $CacheDir "pnpm-store"
 $InstallerDepsDir = Join-Path $CacheDir "installer-deps"
 $AssetsDir = Join-Path $WorkRoot "assets"
+$DesktopCargoTargetDir = Join-Path $CacheDir "cargo-target"
+$CliCargoTargetDir = Join-Path $CacheDir "cargo-target-cli"
 
 function Require-Command {
     param([string]$Name)
@@ -112,7 +136,7 @@ $git = Require-Command "git"
 $cargo = Require-Command "cargo"
 $pnpm = Require-Command "pnpm"
 
-New-Item -ItemType Directory -Force $WorkRoot, $CacheDir, $CargoTargetDir, $PnpmStoreDir, $InstallerDepsDir, $AssetsDir | Out-Null
+New-Item -ItemType Directory -Force $WorkRoot, $CacheDir, $DesktopCargoTargetDir, $CliCargoTargetDir, $PnpmStoreDir, $InstallerDepsDir, $AssetsDir | Out-Null
 
 if (-not (Test-Path (Join-Path $SourceDir ".git"))) {
     if (Test-Path $SourceDir) {
@@ -132,13 +156,25 @@ try {
     $version = Get-AppVersion -CargoTomlPath (Join-Path $SourceDir "rust\Cargo.toml")
 
     $env:APP_VERSION = $version
-    $env:CARGO_TARGET_DIR = $CargoTargetDir
+    $env:CARGO_TARGET_DIR = $DesktopCargoTargetDir
     $env:PNPM_HOME = if ($env:PNPM_HOME) { $env:PNPM_HOME } else { Join-Path $CacheDir "pnpm-home" }
 
     Write-Host "Building Win-CodexBar $version from $commit"
     Write-Host "Source: $SourceDir"
-    Write-Host "Cargo target cache: $CargoTargetDir"
+    Write-Host "Cargo target cache: $DesktopCargoTargetDir"
     Write-Host "pnpm store cache: $PnpmStoreDir"
+
+    if ($WarmCliCache) {
+        $env:CARGO_TARGET_DIR = $CliCargoTargetDir
+        Write-Host "CLI Cargo target cache: $CliCargoTargetDir"
+        Invoke-Native $cargo.Source @(
+            "build",
+            "--manifest-path", "rust\Cargo.toml",
+            "--release",
+            "--bin", "codexbar"
+        )
+        $env:CARGO_TARGET_DIR = $DesktopCargoTargetDir
+    }
 
     Invoke-Native $pnpm.Source @(
         "--dir", "apps\desktop-tauri",
@@ -155,8 +191,8 @@ try {
         "--no-bundle"
     )
 
-    $sourceExe = Join-Path $CargoTargetDir "release\codexbar-desktop-tauri.exe"
-    $releaseExe = Join-Path $CargoTargetDir "release\codexbar.exe"
+    $sourceExe = Join-Path $DesktopCargoTargetDir "release\codexbar-desktop-tauri.exe"
+    $releaseExe = Join-Path $DesktopCargoTargetDir "release\codexbar.exe"
     if (-not (Test-Path $sourceExe)) {
         throw "Missing expected Tauri binary: $sourceExe"
     }
@@ -164,6 +200,12 @@ try {
     Copy-Item $sourceExe $releaseExe -Force
     if (Get-ObjdumpImportsWebView2Loader -ExePath $releaseExe) {
         throw "codexbar.exe imports WebView2Loader.dll, but release builds are expected to statically link the loader."
+    }
+
+    if ($WarmCacheOnly) {
+        Write-Host ""
+        Write-Host "Warm cache completed. Skipping installer packaging because -WarmCacheOnly was supplied."
+        return
     }
 
     $vcRedistPath = Join-Path $InstallerDepsDir "vc_redist.x64.exe"
@@ -192,7 +234,7 @@ try {
         Invoke-Native $iscc @(
             "/Qp",
             "/DAppVersion=$version",
-            "/DTargetBinDir=$($CargoTargetDir)\release",
+            "/DTargetBinDir=$($DesktopCargoTargetDir)\release",
             "/DVCRedistPath=$vcRedistPath",
             "/DWebView2BootstrapperPath=$webView2BootstrapperPath",
             "/DOutputDir=$installerOut",
@@ -220,6 +262,35 @@ try {
         $fileName = Split-Path $asset -Leaf
         $hash = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLower()
         "$hash  $fileName" | Set-Content -Encoding ascii "$asset.sha256"
+    }
+
+    if ($SmokeInstall) {
+        $smokeScript = Join-Path $SourceDir "scripts\windows-smoke-install.ps1"
+        if (-not (Test-Path $smokeScript)) {
+            throw "Smoke install script not found: $smokeScript"
+        }
+        & $smokeScript -InstallerPath $installerAsset -ExpectedVersion $version
+        if ($LASTEXITCODE -ne 0) {
+            throw "Smoke install failed with exit code $LASTEXITCODE"
+        }
+    }
+
+    if ($UploadRelease) {
+        $gh = Require-Command "gh"
+        $assetPaths = @(
+            $installerAsset,
+            "$installerAsset.sha256",
+            $portableExe,
+            "$portableExe.sha256"
+        )
+        foreach ($path in $assetPaths) {
+            if (-not (Test-Path $path)) {
+                throw "Missing upload asset: $path"
+            }
+        }
+
+        Invoke-Native $gh.Source @("release", "view", $UploadRelease)
+        Invoke-Native $gh.Source (@("release", "upload", $UploadRelease) + $assetPaths + @("--clobber"))
     }
 
     Write-Host ""
