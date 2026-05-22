@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useFormattedResetTime } from "../hooks/useFormattedResetTime";
 import { useProviders } from "../hooks/useProviders";
 import { getSettingsSnapshot, refreshProvidersIfStale } from "../lib/tauri";
 import { ProviderIcon } from "../components/providers/ProviderIcon";
@@ -20,21 +21,6 @@ import "./FloatBar.css";
  * high-usage threshold, red when remaining is below the critical threshold
  * or the provider is exhausted.
  */
-function formatResetIn(resetsAt: string | null): string | null {
-  if (!resetsAt) return null;
-  const target = Date.parse(resetsAt);
-  if (Number.isNaN(target)) return null;
-  const diffMs = target - Date.now();
-  if (diffMs <= 0) return "due now";
-  const totalMinutes = Math.floor(diffMs / 60_000);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
-}
-
 function ProviderPill({
   provider,
   highRemaining,
@@ -52,12 +38,12 @@ function ProviderPill({
 
   const brand = getProviderIcon(provider.providerId).brandColor;
   const label = provider.error ? "—" : `${Math.round(remaining)}%`;
-  const resetIn = formatResetIn(provider.primary.resetsAt);
-  const resetSuffix = resetIn
-    ? `\nResets in ${resetIn}`
-    : provider.primary.resetDescription
-      ? `\nResets ${provider.primary.resetDescription}`
-      : "";
+  const resetText = useFormattedResetTime(
+    provider.primary.resetsAt,
+    provider.primary.resetDescription,
+    true,
+  );
+  const resetSuffix = resetText ? `\n${resetText}` : "";
 
   return (
     <div

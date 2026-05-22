@@ -169,17 +169,20 @@ mod tests {
             float_bar_enabled: false,
             float_bar_opacity: 80,
             float_bar_orientation: "horizontal".into(),
+            float_bar_dark_text: false,
             ..Settings::default()
         };
 
         let patch = SettingsPatch {
             enabled: Some(true),
             opacity: Some(45),
+            dark_text: Some(true),
             ..SettingsPatch::default()
         };
         patch.apply(&mut s);
         assert!(s.float_bar_enabled);
         assert_eq!(s.float_bar_opacity, 45);
+        assert!(s.float_bar_dark_text);
         // Orientation untouched by the patch.
         assert_eq!(s.float_bar_orientation, "horizontal");
     }
@@ -205,5 +208,6 @@ mod tests {
         assert_eq!(s.float_bar_enabled, original.float_bar_enabled);
         assert_eq!(s.float_bar_opacity, original.float_bar_opacity);
         assert_eq!(s.float_bar_orientation, original.float_bar_orientation);
+        assert_eq!(s.float_bar_dark_text, original.float_bar_dark_text);
     }
 }

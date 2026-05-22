@@ -108,7 +108,7 @@ body.floatbar-window #root {
 }
 
 /* ── Light-background mode ─────────────────────────────────────────────
- * Inverts the palette: dark glass + dark text for legibility over a
+ * Inverts the palette: light glass + dark text for legibility over a
  * bright desktop. Brand-colored borders still win via --brand.
  */
 .floatbar--light-bg {

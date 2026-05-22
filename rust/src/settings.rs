@@ -1940,6 +1940,7 @@ mod tests {
         assert_eq!(settings.float_bar_orientation, "horizontal");
         assert!(!settings.float_bar_click_through);
         assert!(settings.float_bar_provider_ids.is_empty());
+        assert!(!settings.float_bar_dark_text);
     }
 
     #[test]
@@ -1977,6 +1978,7 @@ mod tests {
             float_bar_orientation: "vertical".to_string(),
             float_bar_click_through: true,
             float_bar_provider_ids: vec!["claude".into(), "codex".into()],
+            float_bar_dark_text: true,
             ..Settings::default()
         };
 
@@ -1987,6 +1989,7 @@ mod tests {
         assert_eq!(back.float_bar_orientation, "vertical");
         assert!(back.float_bar_click_through);
         assert_eq!(back.float_bar_provider_ids, vec!["claude", "codex"]);
+        assert!(back.float_bar_dark_text);
     }
 
     #[test]
