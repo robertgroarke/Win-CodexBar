@@ -17,25 +17,15 @@ Local modifications applied on top of `Finesssee/Win-CodexBar` upstream. Tracked
 
 ## P-001 — Default `start_minimized = false`
 
-**Status:** planned
-**Target files:** `rust/src/settings.rs` (or wherever `Settings::default()` lives — verify with `rg "start_minimized" rust/src apps/desktop-tauri/src-tauri/src`)
-**Last verified commit:** _none yet_
+**Status:** upstreamed (no patch needed)
+**Target files:** `rust/src/settings.rs` — `Settings::default()` at line 250
+**Last verified commit:** 950419338c56af0b66d7d2e9f21a6d461eb00724
 
-**What:** Flip the default value of `start_minimized` from `true` to `false` so the dashboard window opens visibly on first launch and after every reboot. Currently CodexBar starts in tray and requires a click to surface.
+**What:** Default value of `start_minimized` should be `false` so the dashboard window opens visibly on first launch and after every reboot.
 
 **Why:** I want at-a-glance visibility of usage on boot. The float bar (P-002) is a partial alternative, but having the full dashboard on launch is what I actually use.
 
-**How to apply:**
-1. `rg -n "start_minimized" rust/ apps/desktop-tauri/src-tauri/` — find the default constructor.
-2. Change the default literal `true` → `false`.
-3. If the value is also written into the schema (`rust/gen/`), regenerate or hand-patch.
-4. Rebuild: `cd apps/desktop-tauri && npm run tauri:build`.
-
-**How to verify:**
-1. Uninstall existing CodexBar (`winget uninstall Finesssee.Win-CodexBar`).
-2. Delete `%APPDATA%\CodexBar\settings.json` to force defaults.
-3. Install the freshly-built installer from `apps/desktop-tauri/src-tauri/target/release/bundle/`.
-4. Reboot. Dashboard window should appear without clicking the tray.
+**Resolution:** Upstream `Settings::default()` already sets `start_minimized: false` at [rust/src/settings.rs:250](rust/src/settings.rs#L250), and the test fixtures (`rust/src/settings/tests.rs:80`, `:238`) match. No fork-local change required. Re-check on any upstream merge that touches `rust/src/settings.rs`.
 
 ---
 
@@ -85,6 +75,6 @@ When `git merge upstream/main` touches any file in any patch above:
 
 | ID | Status | Summary |
 |---|---|---|
-| P-001 | planned | Default `start_minimized = false` |
+| P-001 | upstreamed | Default `start_minimized = false` (no patch needed; matches upstream) |
 | P-002 | planned | Default `float_bar = true` |
 | P-003 | planned | Pre-enable Claude/Codex/Gemini/Ollama |
