@@ -9,89 +9,99 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 use crate::shell;
 
+const KEY_ALIASES: &[(&str, Code)] = &[
+    ("a", Code::KeyA),
+    ("b", Code::KeyB),
+    ("c", Code::KeyC),
+    ("d", Code::KeyD),
+    ("e", Code::KeyE),
+    ("f", Code::KeyF),
+    ("g", Code::KeyG),
+    ("h", Code::KeyH),
+    ("i", Code::KeyI),
+    ("j", Code::KeyJ),
+    ("k", Code::KeyK),
+    ("l", Code::KeyL),
+    ("m", Code::KeyM),
+    ("n", Code::KeyN),
+    ("o", Code::KeyO),
+    ("p", Code::KeyP),
+    ("q", Code::KeyQ),
+    ("r", Code::KeyR),
+    ("s", Code::KeyS),
+    ("t", Code::KeyT),
+    ("u", Code::KeyU),
+    ("v", Code::KeyV),
+    ("w", Code::KeyW),
+    ("x", Code::KeyX),
+    ("y", Code::KeyY),
+    ("z", Code::KeyZ),
+    ("0", Code::Digit0),
+    ("1", Code::Digit1),
+    ("2", Code::Digit2),
+    ("3", Code::Digit3),
+    ("4", Code::Digit4),
+    ("5", Code::Digit5),
+    ("6", Code::Digit6),
+    ("7", Code::Digit7),
+    ("8", Code::Digit8),
+    ("9", Code::Digit9),
+    ("f1", Code::F1),
+    ("f2", Code::F2),
+    ("f3", Code::F3),
+    ("f4", Code::F4),
+    ("f5", Code::F5),
+    ("f6", Code::F6),
+    ("f7", Code::F7),
+    ("f8", Code::F8),
+    ("f9", Code::F9),
+    ("f10", Code::F10),
+    ("f11", Code::F11),
+    ("f12", Code::F12),
+    ("space", Code::Space),
+    ("enter", Code::Enter),
+    ("return", Code::Enter),
+    ("escape", Code::Escape),
+    ("esc", Code::Escape),
+    ("tab", Code::Tab),
+];
+
 /// Parse a settings shortcut string (e.g. `"Ctrl+Shift+U"`) into a Tauri `Shortcut`.
 ///
 /// Public so that callers (e.g. the settings command) can validate a shortcut
 /// string before persisting it.
 pub fn parse_shortcut(s: &str) -> Option<Shortcut> {
-    let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
-    if parts.is_empty() {
-        return None;
-    }
-
     let mut mods = Modifiers::empty();
     let mut key_code: Option<Code> = None;
 
-    for part in &parts {
-        match part.to_lowercase().as_str() {
-            "ctrl" | "control" => mods |= Modifiers::CONTROL,
-            "shift" => mods |= Modifiers::SHIFT,
-            "alt" => mods |= Modifiers::ALT,
-            "super" | "win" | "meta" => mods |= Modifiers::SUPER,
-            k if k.len() == 1 => {
-                key_code = match k.chars().next()? {
-                    'a' => Some(Code::KeyA),
-                    'b' => Some(Code::KeyB),
-                    'c' => Some(Code::KeyC),
-                    'd' => Some(Code::KeyD),
-                    'e' => Some(Code::KeyE),
-                    'f' => Some(Code::KeyF),
-                    'g' => Some(Code::KeyG),
-                    'h' => Some(Code::KeyH),
-                    'i' => Some(Code::KeyI),
-                    'j' => Some(Code::KeyJ),
-                    'k' => Some(Code::KeyK),
-                    'l' => Some(Code::KeyL),
-                    'm' => Some(Code::KeyM),
-                    'n' => Some(Code::KeyN),
-                    'o' => Some(Code::KeyO),
-                    'p' => Some(Code::KeyP),
-                    'q' => Some(Code::KeyQ),
-                    'r' => Some(Code::KeyR),
-                    's' => Some(Code::KeyS),
-                    't' => Some(Code::KeyT),
-                    'u' => Some(Code::KeyU),
-                    'v' => Some(Code::KeyV),
-                    'w' => Some(Code::KeyW),
-                    'x' => Some(Code::KeyX),
-                    'y' => Some(Code::KeyY),
-                    'z' => Some(Code::KeyZ),
-                    '0' => Some(Code::Digit0),
-                    '1' => Some(Code::Digit1),
-                    '2' => Some(Code::Digit2),
-                    '3' => Some(Code::Digit3),
-                    '4' => Some(Code::Digit4),
-                    '5' => Some(Code::Digit5),
-                    '6' => Some(Code::Digit6),
-                    '7' => Some(Code::Digit7),
-                    '8' => Some(Code::Digit8),
-                    '9' => Some(Code::Digit9),
-                    _ => None,
-                };
-            }
-            "f1" => key_code = Some(Code::F1),
-            "f2" => key_code = Some(Code::F2),
-            "f3" => key_code = Some(Code::F3),
-            "f4" => key_code = Some(Code::F4),
-            "f5" => key_code = Some(Code::F5),
-            "f6" => key_code = Some(Code::F6),
-            "f7" => key_code = Some(Code::F7),
-            "f8" => key_code = Some(Code::F8),
-            "f9" => key_code = Some(Code::F9),
-            "f10" => key_code = Some(Code::F10),
-            "f11" => key_code = Some(Code::F11),
-            "f12" => key_code = Some(Code::F12),
-            "space" => key_code = Some(Code::Space),
-            "enter" | "return" => key_code = Some(Code::Enter),
-            "escape" | "esc" => key_code = Some(Code::Escape),
-            "tab" => key_code = Some(Code::Tab),
-            _ => {}
+    for part in s.split('+').map(str::trim).filter(|part| !part.is_empty()) {
+        if let Some(parsed_modifier) = parse_modifier(part) {
+            mods |= parsed_modifier;
+        } else if let Some(parsed_key) = parse_key(part) {
+            key_code = Some(parsed_key);
         }
     }
 
     let key = key_code?;
     let m = if mods.is_empty() { None } else { Some(mods) };
     Some(Shortcut::new(m, key))
+}
+
+fn parse_modifier(token: &str) -> Option<Modifiers> {
+    match token.to_ascii_lowercase().as_str() {
+        "ctrl" | "control" => Some(Modifiers::CONTROL),
+        "shift" => Some(Modifiers::SHIFT),
+        "alt" => Some(Modifiers::ALT),
+        "super" | "win" | "meta" => Some(Modifiers::SUPER),
+        _ => None,
+    }
+}
+
+fn parse_key(token: &str) -> Option<Code> {
+    let normalized = token.to_ascii_lowercase();
+    KEY_ALIASES
+        .iter()
+        .find_map(|(alias, code)| (*alias == normalized).then_some(*code))
 }
 
 /// Build the Tauri global-shortcut plugin with the tray-panel toggle handler.

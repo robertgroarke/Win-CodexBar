@@ -47,6 +47,192 @@ pub struct SettingsUpdate {
     pub float_bar_dark_text: Option<bool>,
 }
 
+impl SettingsUpdate {
+    fn notifies_float_bar(&self) -> bool {
+        self.enabled_providers.is_some()
+            || self.refresh_interval_secs.is_some()
+            || self.high_usage_threshold.is_some()
+            || self.critical_usage_threshold.is_some()
+    }
+
+    fn rebuilds_tray_menu(&self) -> bool {
+        self.float_bar_enabled.is_some()
+    }
+
+    fn validate_shortcut_change(
+        &self,
+        app: &tauri::AppHandle,
+        current_shortcut: &str,
+    ) -> Result<(), String> {
+        let Some(new_shortcut) = &self.global_shortcut else {
+            return Ok(());
+        };
+
+        if new_shortcut != current_shortcut {
+            crate::shortcut_bridge::reregister_shortcut(app, current_shortcut, new_shortcut)?;
+        }
+
+        Ok(())
+    }
+
+    fn apply_provider_settings(self, settings: &mut Settings) -> Self {
+        if let Some(providers) = self.enabled_providers.clone() {
+            settings.enabled_providers = providers.into_iter().collect::<HashSet<_>>();
+        }
+        if let Some(v) = self.refresh_interval_secs {
+            settings.refresh_interval_secs = v;
+        }
+        if let Some(ref s) = self.tray_icon_mode
+            && let Some(mode) = parse_tray_icon_mode(s)
+        {
+            settings.tray_icon_mode = mode;
+        }
+        if let Some(v) = self.provider_metrics.clone() {
+            apply_provider_metrics(settings, v);
+        }
+        self
+    }
+
+    fn apply_general_settings(self, settings: &mut Settings) -> Result<Self, String> {
+        if let Some(v) = self.start_at_login {
+            settings.set_start_at_login(v).map_err(|e| e.to_string())?;
+        }
+        if let Some(v) = self.start_minimized {
+            settings.start_minimized = v;
+        }
+        if let Some(v) = self.global_shortcut.clone() {
+            settings.global_shortcut = v;
+        }
+        if let Some(v) = self.ui_language.as_deref().and_then(parse_language)
+            && settings.ui_language != v
+        {
+            settings.ui_language = v;
+        }
+        if let Some(v) = self.theme.as_deref().and_then(parse_theme) {
+            settings.theme = v;
+        }
+        Ok(self)
+    }
+
+    fn apply_display_settings(self, settings: &mut Settings) -> Self {
+        if let Some(v) = self.show_as_used {
+            settings.show_as_used = v;
+        }
+        if let Some(v) = self.reset_time_relative {
+            settings.reset_time_relative = v;
+        }
+        if let Some(v) = self.menu_bar_display_mode.clone() {
+            settings.menu_bar_display_mode = v;
+        }
+        if let Some(v) = self.switcher_shows_icons {
+            settings.switcher_shows_icons = v;
+        }
+        if let Some(v) = self.menu_bar_shows_highest_usage {
+            settings.menu_bar_shows_highest_usage = v;
+        }
+        if let Some(v) = self.menu_bar_shows_percent {
+            settings.menu_bar_shows_percent = v;
+        }
+        if let Some(v) = self.show_credits_extra_usage {
+            settings.show_credits_extra_usage = v;
+        }
+        if let Some(v) = self.show_all_token_accounts_in_menu {
+            settings.show_all_token_accounts_in_menu = v;
+        }
+        self
+    }
+
+    fn apply_notification_settings(self, settings: &mut Settings) -> Self {
+        if let Some(v) = self.show_notifications {
+            settings.show_notifications = v;
+        }
+        if let Some(v) = self.sound_enabled {
+            settings.sound_enabled = v;
+        }
+        if let Some(v) = self.sound_volume {
+            settings.sound_volume = v;
+        }
+        if let Some(v) = self.high_usage_threshold {
+            settings.high_usage_threshold = v.clamp(0.0, 100.0);
+        }
+        if let Some(v) = self.critical_usage_threshold {
+            settings.critical_usage_threshold = v.clamp(0.0, 100.0);
+        }
+        self
+    }
+
+    fn apply_advanced_settings(self, settings: &mut Settings) -> Self {
+        if let Some(v) = self.surprise_animations {
+            settings.surprise_animations = v;
+        }
+        if let Some(v) = self.enable_animations {
+            settings.enable_animations = v;
+        }
+        if let Some(v) = self.hide_personal_info {
+            settings.hide_personal_info = v;
+        }
+        if let Some(v) = self
+            .update_channel
+            .as_deref()
+            .and_then(parse_update_channel)
+        {
+            settings.update_channel = v;
+        }
+        if let Some(v) = self.auto_download_updates {
+            settings.auto_download_updates = v;
+        }
+        if let Some(v) = self.install_updates_on_quit {
+            settings.install_updates_on_quit = v;
+        }
+        if let Some(v) = self.claude_avoid_keychain_prompts {
+            settings.set_claude_avoid_keychain_prompts(v);
+        }
+        if let Some(v) = self.disable_keychain_access {
+            settings.disable_keychain_access = v;
+            if v {
+                settings.set_claude_avoid_keychain_prompts(true);
+            }
+        }
+        if let Some(v) = self.show_debug_settings {
+            settings.show_debug_settings = v;
+        }
+        self
+    }
+
+    fn float_bar_patch(&self) -> crate::floatbar::SettingsPatch {
+        crate::floatbar::SettingsPatch {
+            enabled: self.float_bar_enabled,
+            opacity: self.float_bar_opacity,
+            orientation: self.float_bar_orientation.clone(),
+            click_through: self.float_bar_click_through,
+            provider_ids: self.float_bar_provider_ids.clone(),
+            dark_text: self.float_bar_dark_text,
+        }
+    }
+
+    fn apply_to(self, settings: &mut Settings) -> Result<crate::floatbar::SettingsPatch, String> {
+        let float_bar_patch = self.float_bar_patch();
+        self.apply_provider_settings(settings)
+            .apply_general_settings(settings)?
+            .apply_display_settings(settings)
+            .apply_notification_settings(settings)
+            .apply_advanced_settings(settings);
+        float_bar_patch.apply(settings);
+        Ok(float_bar_patch)
+    }
+}
+
+fn apply_provider_metrics(
+    settings: &mut Settings,
+    metrics_map: std::collections::HashMap<String, String>,
+) {
+    for (provider, label) in metrics_map {
+        if let Some(pref) = parse_metric_preference(&label) {
+            settings.provider_metrics.insert(provider, pref);
+        }
+    }
+}
+
 fn parse_tray_icon_mode(s: &str) -> Option<TrayIconMode> {
     match s {
         "single" => Some(TrayIconMode::Single),
@@ -77,138 +263,16 @@ pub async fn update_settings(
     patch: SettingsUpdate,
 ) -> Result<SettingsSnapshot, String> {
     let mut settings = Settings::load();
-    let notify_float_bar = patch.enabled_providers.is_some()
-        || patch.refresh_interval_secs.is_some()
-        || patch.high_usage_threshold.is_some()
-        || patch.critical_usage_threshold.is_some();
-    let rebuild_tray_menu = patch.float_bar_enabled.is_some();
+    let notify_float_bar = patch.notifies_float_bar();
+    let rebuild_tray_menu = patch.rebuilds_tray_menu();
+    let previous_language = settings.ui_language;
 
-    // If the shortcut is changing, validate and re-register before persisting.
-    if let Some(ref new_shortcut) = patch.global_shortcut
-        && *new_shortcut != settings.global_shortcut
-    {
-        crate::shortcut_bridge::reregister_shortcut(&app, &settings.global_shortcut, new_shortcut)?;
-    }
+    patch.validate_shortcut_change(&app, &settings.global_shortcut)?;
+    let float_bar_patch = patch.apply_to(&mut settings)?;
 
-    if let Some(providers) = patch.enabled_providers {
-        settings.enabled_providers = providers.into_iter().collect::<HashSet<_>>();
+    if settings.ui_language != previous_language {
+        let _ = app.emit(events::LOCALE_CHANGED, language_label(settings.ui_language));
     }
-    if let Some(v) = patch.refresh_interval_secs {
-        settings.refresh_interval_secs = v;
-    }
-    if let Some(v) = patch.start_at_login {
-        settings.set_start_at_login(v).map_err(|e| e.to_string())?;
-    }
-    if let Some(v) = patch.show_notifications {
-        settings.show_notifications = v;
-    }
-    if let Some(ref s) = patch.tray_icon_mode
-        && let Some(mode) = parse_tray_icon_mode(s)
-    {
-        settings.tray_icon_mode = mode;
-    }
-    if let Some(v) = patch.show_as_used {
-        settings.show_as_used = v;
-    }
-    if let Some(v) = patch.surprise_animations {
-        settings.surprise_animations = v;
-    }
-    if let Some(v) = patch.enable_animations {
-        settings.enable_animations = v;
-    }
-    if let Some(v) = patch.reset_time_relative {
-        settings.reset_time_relative = v;
-    }
-    if let Some(v) = patch.menu_bar_display_mode {
-        settings.menu_bar_display_mode = v;
-    }
-    if let Some(v) = patch.hide_personal_info {
-        settings.hide_personal_info = v;
-    }
-    if let Some(ref s) = patch.update_channel
-        && let Some(ch) = parse_update_channel(s)
-    {
-        settings.update_channel = ch;
-    }
-    if let Some(v) = patch.global_shortcut {
-        settings.global_shortcut = v;
-    }
-    if let Some(ref s) = patch.ui_language
-        && let Some(lang) = parse_language(s)
-        && settings.ui_language != lang
-    {
-        settings.ui_language = lang;
-        let _ = app.emit(events::LOCALE_CHANGED, language_label(lang));
-    }
-    if let Some(ref s) = patch.theme
-        && let Some(theme) = parse_theme(s)
-    {
-        settings.theme = theme;
-    }
-    if let Some(v) = patch.start_minimized {
-        settings.start_minimized = v;
-    }
-    if let Some(v) = patch.sound_enabled {
-        settings.sound_enabled = v;
-    }
-    if let Some(v) = patch.sound_volume {
-        settings.sound_volume = v;
-    }
-    if let Some(v) = patch.high_usage_threshold {
-        settings.high_usage_threshold = v.clamp(0.0, 100.0);
-    }
-    if let Some(v) = patch.critical_usage_threshold {
-        settings.critical_usage_threshold = v.clamp(0.0, 100.0);
-    }
-    if let Some(v) = patch.switcher_shows_icons {
-        settings.switcher_shows_icons = v;
-    }
-    if let Some(v) = patch.menu_bar_shows_highest_usage {
-        settings.menu_bar_shows_highest_usage = v;
-    }
-    if let Some(v) = patch.menu_bar_shows_percent {
-        settings.menu_bar_shows_percent = v;
-    }
-    if let Some(v) = patch.show_credits_extra_usage {
-        settings.show_credits_extra_usage = v;
-    }
-    if let Some(v) = patch.show_all_token_accounts_in_menu {
-        settings.show_all_token_accounts_in_menu = v;
-    }
-    if let Some(v) = patch.auto_download_updates {
-        settings.auto_download_updates = v;
-    }
-    if let Some(v) = patch.install_updates_on_quit {
-        settings.install_updates_on_quit = v;
-    }
-    if let Some(v) = patch.claude_avoid_keychain_prompts {
-        settings.set_claude_avoid_keychain_prompts(v);
-    }
-    if let Some(v) = patch.disable_keychain_access {
-        settings.disable_keychain_access = v;
-        if v {
-            settings.set_claude_avoid_keychain_prompts(true);
-        }
-    }
-    if let Some(v) = patch.show_debug_settings {
-        settings.show_debug_settings = v;
-    }
-    if let Some(metrics_map) = patch.provider_metrics {
-        for (provider, label) in metrics_map {
-            if let Some(pref) = parse_metric_preference(&label) {
-                settings.provider_metrics.insert(provider, pref);
-            }
-        }
-    }
-    let float_bar_patch = crate::floatbar::SettingsPatch {
-        enabled: patch.float_bar_enabled,
-        opacity: patch.float_bar_opacity,
-        orientation: patch.float_bar_orientation,
-        click_through: patch.float_bar_click_through,
-        provider_ids: patch.float_bar_provider_ids,
-        dark_text: patch.float_bar_dark_text,
-    };
-    float_bar_patch.apply(&mut settings);
 
     settings.save().map_err(|e| e.to_string())?;
 

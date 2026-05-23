@@ -28,6 +28,20 @@ pub struct KiroProvider {
     metadata: ProviderMetadata,
 }
 
+struct KiroCliUsage {
+    plan_name: String,
+    matched_new_format: bool,
+    is_managed_plan: bool,
+    reset_date: Option<chrono::DateTime<chrono::Utc>>,
+    credits_percent: f64,
+    matched_percent: bool,
+    matched_credits: bool,
+    bonus_window: Option<RateWindow>,
+    overages_enabled: bool,
+    overage_credits_used: Option<f64>,
+    estimated_overage_cost: Option<f64>,
+}
+
 impl KiroProvider {
     pub fn new() -> Self {
         Self {
@@ -169,126 +183,25 @@ impl KiroProvider {
             ));
         }
 
-        // Parse plan name from "| KIRO FREE" or similar (legacy format)
-        let mut plan_name = "Kiro".to_string();
-        if let Ok(re) = Regex::new(r"\|\s*(KIRO\s+\w+)")
-            && let Some(caps) = re.captures(&stripped)
-            && let Some(m) = caps.get(1)
-        {
-            plan_name = m.as_str().trim().to_string();
-        }
-
-        // Parse plan name from "Plan: Q Developer Pro" (new format, kiro-cli 1.24+)
-        let mut matched_new_format = false;
-        if let Ok(re) = Regex::new(r"Plan:\s*(.+)")
-            && let Some(caps) = re.captures(&stripped)
-            && let Some(m) = caps.get(1)
-        {
-            let plan_line = m.as_str().trim();
-            if let Some(first_line) = plan_line.lines().next() {
-                plan_name = first_line.trim().to_string();
-                matched_new_format = true;
-            }
-        }
-
-        // Check if this is a managed plan with no usage data
-        let is_managed_plan =
-            lowered.contains("managed by admin") || lowered.contains("managed by organization");
-
-        // Parse reset date from "resets on 01/01"
-        let mut reset_date: Option<chrono::DateTime<chrono::Utc>> = None;
-        if let Ok(re) = Regex::new(r"resets on (\d{2}/\d{2})")
-            && let Some(caps) = re.captures(&stripped)
-            && let Some(m) = caps.get(1)
-        {
-            reset_date = Self::parse_reset_date(m.as_str());
-        }
-
-        // Parse credits percentage from progress bar like "████...█ X%"
-        let mut credits_percent: f64 = 0.0;
-        let mut matched_percent = false;
-        if let Ok(re) = Regex::new(r"█+\s*(\d+)%")
-            && let Some(caps) = re.captures(&stripped)
-            && let Some(m) = caps.get(1)
-        {
-            credits_percent = m.as_str().parse().unwrap_or(0.0);
-            matched_percent = true;
-        }
-
-        // Parse credits used/total from "(X.XX of Y covered in plan)"
-        let mut credits_used: f64 = 0.0;
-        let mut credits_total: f64 = 50.0; // default free tier
-        let mut matched_credits = false;
-        if let Ok(re) = Regex::new(r"\((\d+\.?\d*)\s+of\s+(\d+)\s+covered")
-            && let Some(caps) = re.captures(&stripped)
-            && let (Some(used), Some(total)) = (caps.get(1), caps.get(2))
-        {
-            credits_used = used.as_str().parse().unwrap_or(0.0);
-            credits_total = total.as_str().parse().unwrap_or(50.0);
-            matched_credits = true;
-        }
-
-        // Calculate percent from credits if we didn't get it from the progress bar
-        if !matched_percent && matched_credits && credits_total > 0.0 {
-            credits_percent = (credits_used / credits_total) * 100.0;
-        }
-
-        // Parse bonus credits from "Bonus credits: X.XX/Y credits used, expires in Z days"
-        let mut bonus_window: Option<RateWindow> = None;
-        if let Ok(re) = Regex::new(r"Bonus credits:\s*(\d+\.?\d*)/(\d+)")
-            && let Some(caps) = re.captures(&stripped)
-            && let (Some(used), Some(total)) = (caps.get(1), caps.get(2))
-        {
-            let bonus_used: f64 = used.as_str().parse().unwrap_or(0.0);
-            let bonus_total: f64 = total.as_str().parse().unwrap_or(0.0);
-            if bonus_total > 0.0 {
-                let bonus_percent = (bonus_used / bonus_total) * 100.0;
-
-                // Try to get expiry days
-                let mut expiry_desc: Option<String> = None;
-                if let Ok(exp_re) = Regex::new(r"expires in (\d+) days?")
-                    && let Some(exp_caps) = exp_re.captures(&stripped)
-                    && let Some(days) = exp_caps.get(1)
-                {
-                    expiry_desc = Some(format!("expires in {}d", days.as_str()));
-                }
-
-                bonus_window = Some(RateWindow::with_details(
-                    bonus_percent,
-                    None,
-                    None,
-                    expiry_desc,
-                ));
-            }
-        }
-
-        // v0.27: newer Kiro usage output may include overage rows:
-        // "Overages: Enabled", "Credits used: 1.25", "Est. cost: $0.50 USD".
-        let overages_enabled = Regex::new(r"(?i)Overages:\s*([^\n]+)")
-            .ok()
-            .and_then(|re| re.captures(&stripped))
-            .and_then(|caps| caps.get(1).map(|m| m.as_str().trim().to_lowercase()))
-            .is_some_and(|value| value.starts_with("enabled"));
-        let overage_credits_used = Regex::new(r"(?i)Credits used:\s*(\d+\.?\d*)")
-            .ok()
-            .and_then(|re| re.captures(&stripped))
-            .and_then(|caps| caps.get(1)?.as_str().parse::<f64>().ok());
-        let estimated_overage_cost = Regex::new(r"(?i)Est\.\s*cost:\s*\$?(\d+\.?\d*)\s*USD")
-            .ok()
-            .and_then(|re| re.captures(&stripped))
-            .and_then(|caps| caps.get(1)?.as_str().parse::<f64>().ok());
+        let parsed = Self::parse_usage_fields(&stripped, &lowered);
 
         // Managed plans in new format may omit usage metrics
-        if matched_new_format && is_managed_plan && !matched_percent && !matched_credits {
-            let usage = UsageSnapshot::new(RateWindow::new(0.0)).with_login_method(&plan_name);
+        if parsed.matched_new_format
+            && parsed.is_managed_plan
+            && !parsed.matched_percent
+            && !parsed.matched_credits
+        {
+            let usage =
+                UsageSnapshot::new(RateWindow::new(0.0)).with_login_method(&parsed.plan_name);
             return Ok(usage);
         }
 
         // Require at least some pattern to match
-        if !matched_percent && !matched_credits {
-            if matched_new_format || plan_name != "Kiro" {
+        if !parsed.matched_percent && !parsed.matched_credits {
+            if parsed.matched_new_format || parsed.plan_name != "Kiro" {
                 // We got a plan name but no usage data
-                let usage = UsageSnapshot::new(RateWindow::new(0.0)).with_login_method(&plan_name);
+                let usage =
+                    UsageSnapshot::new(RateWindow::new(0.0)).with_login_method(&parsed.plan_name);
                 return Ok(usage);
             }
             // If we have the CLI but can't parse, at least report it's installed
@@ -298,40 +211,148 @@ impl KiroProvider {
         }
 
         let primary = RateWindow::with_details(
-            credits_percent,
+            parsed.credits_percent,
             None, // monthly, no fixed window
-            reset_date,
+            parsed.reset_date,
             None,
         );
 
-        let mut usage = UsageSnapshot::new(primary).with_login_method(&plan_name);
+        let mut usage = UsageSnapshot::new(primary).with_login_method(&parsed.plan_name);
+        usage = Self::apply_overage_windows(usage, &parsed);
 
-        if let Some(bonus) = bonus_window {
+        if let Some(bonus) = parsed.bonus_window {
             usage = usage.with_secondary(bonus);
-        }
-        if overages_enabled {
-            if let Some(credits) = overage_credits_used {
-                usage = usage.with_extra_rate_window(
-                    "kiro-overage-credits",
-                    "Overage usage",
-                    RateWindow::with_details(
-                        0.0,
-                        None,
-                        None,
-                        Some(format!("{credits:.2} credits")),
-                    ),
-                );
-            }
-            if let Some(cost) = estimated_overage_cost {
-                usage = usage.with_extra_rate_window(
-                    "kiro-overage-cost",
-                    "Overage cost",
-                    RateWindow::with_details(0.0, None, None, Some(format!("${cost:.2} USD"))),
-                );
-            }
         }
 
         Ok(usage)
+    }
+
+    fn parse_usage_fields(stripped: &str, lowered: &str) -> KiroCliUsage {
+        let (plan_name, matched_new_format) = Self::parse_plan_name(stripped);
+        let (credits_percent, matched_percent, matched_credits) =
+            Self::parse_credit_usage(stripped);
+        let (overages_enabled, overage_credits_used, estimated_overage_cost) =
+            Self::parse_overages(stripped);
+
+        KiroCliUsage {
+            plan_name,
+            matched_new_format,
+            is_managed_plan: lowered.contains("managed by admin")
+                || lowered.contains("managed by organization"),
+            reset_date: Self::capture_text(stripped, r"resets on (\d{2}/\d{2})")
+                .as_deref()
+                .and_then(Self::parse_reset_date),
+            credits_percent,
+            matched_percent,
+            matched_credits,
+            bonus_window: Self::parse_bonus_window(stripped),
+            overages_enabled,
+            overage_credits_used,
+            estimated_overage_cost,
+        }
+    }
+
+    fn parse_plan_name(stripped: &str) -> (String, bool) {
+        if let Some(plan_line) = Self::capture_text(stripped, r"Plan:\s*(.+)")
+            && let Some(first_line) = plan_line.lines().next()
+        {
+            return (first_line.trim().to_string(), true);
+        }
+
+        let legacy = Self::capture_text(stripped, r"\|\s*(KIRO\s+\w+)")
+            .unwrap_or_else(|| "Kiro".to_string());
+        (legacy, false)
+    }
+
+    fn parse_credit_usage(stripped: &str) -> (f64, bool, bool) {
+        if let Some(percent) = Self::capture_number(stripped, r"█+\s*(\d+)%") {
+            return (percent, true, false);
+        }
+
+        let Some((used, total)) =
+            Self::capture_number_pair(stripped, r"\((\d+\.?\d*)\s+of\s+(\d+)\s+covered")
+        else {
+            return (0.0, false, false);
+        };
+
+        let percent = if total > 0.0 {
+            (used / total) * 100.0
+        } else {
+            0.0
+        };
+        (percent, false, true)
+    }
+
+    fn parse_bonus_window(stripped: &str) -> Option<RateWindow> {
+        let (used, total) =
+            Self::capture_number_pair(stripped, r"Bonus credits:\s*(\d+\.?\d*)/(\d+)")?;
+        if total <= 0.0 {
+            return None;
+        }
+
+        let expiry_desc = Self::capture_text(stripped, r"expires in (\d+) days?")
+            .map(|days| format!("expires in {days}d"));
+        Some(RateWindow::with_details(
+            (used / total) * 100.0,
+            None,
+            None,
+            expiry_desc,
+        ))
+    }
+
+    fn parse_overages(stripped: &str) -> (bool, Option<f64>, Option<f64>) {
+        let enabled = Self::capture_text(stripped, r"(?i)Overages:\s*([^\n]+)")
+            .is_some_and(|value| value.to_lowercase().starts_with("enabled"));
+        let credits_used = Self::capture_number(stripped, r"(?i)Credits used:\s*(\d+\.?\d*)");
+        let estimated_cost =
+            Self::capture_number(stripped, r"(?i)Est\.\s*cost:\s*\$?(\d+\.?\d*)\s*USD");
+        (enabled, credits_used, estimated_cost)
+    }
+
+    fn apply_overage_windows(mut usage: UsageSnapshot, parsed: &KiroCliUsage) -> UsageSnapshot {
+        if !parsed.overages_enabled {
+            return usage;
+        }
+
+        if let Some(credits) = parsed.overage_credits_used {
+            usage = usage.with_extra_rate_window(
+                "kiro-overage-credits",
+                "Overage usage",
+                RateWindow::with_details(0.0, None, None, Some(format!("{credits:.2} credits"))),
+            );
+        }
+        if let Some(cost) = parsed.estimated_overage_cost {
+            usage = usage.with_extra_rate_window(
+                "kiro-overage-cost",
+                "Overage cost",
+                RateWindow::with_details(0.0, None, None, Some(format!("${cost:.2} USD"))),
+            );
+        }
+
+        usage
+    }
+
+    fn capture_text(text: &str, pattern: &str) -> Option<String> {
+        Regex::new(pattern)
+            .ok()
+            .and_then(|re| re.captures(text))
+            .and_then(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
+    }
+
+    fn capture_number(text: &str, pattern: &str) -> Option<f64> {
+        Self::capture_text(text, pattern)?.parse().ok()
+    }
+
+    fn capture_number_pair(text: &str, pattern: &str) -> Option<(f64, f64)> {
+        Regex::new(pattern)
+            .ok()
+            .and_then(|re| re.captures(text))
+            .and_then(|caps| {
+                Some((
+                    caps.get(1)?.as_str().parse().ok()?,
+                    caps.get(2)?.as_str().parse().ok()?,
+                ))
+            })
     }
 
     /// Strip ANSI escape sequences from text
