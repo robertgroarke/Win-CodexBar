@@ -3,7 +3,9 @@ use codexbar::{
     cli::{self, Cli, Commands, exit_codes},
     logging, wsl,
 };
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use tokio::runtime::Runtime;
 
 fn launch_log_path() -> PathBuf {
     std::env::temp_dir().join(format!("codexbar_launch_{}.log", std::process::id()))
@@ -44,30 +46,16 @@ fn main() {
 }
 
 fn run(log_path: &Path) -> i32 {
-    let mut log = String::new();
-    log.push_str(&format!("Starting at {:?}\n", std::time::SystemTime::now()));
-
-    if wsl::is_wsl() {
-        log.push_str("Running inside WSL\n");
-        if let Some(info) = wsl::get_wsl_info() {
-            log.push_str(&format!("  Distro: {}\n", info.distro_name));
-            log.push_str(&format!("  Drive mount: {:?}\n", info.drive_mount));
-        }
-    }
-
-    log.push_str(&format!("Args: {:?}\n", launch_arg_summary()));
-    append_launch_log(log_path, &log);
+    append_launch_log(log_path, &startup_log());
 
     let cli = Cli::parse();
 
-    // Initialize logging
     if let Err(e) = logging::init(cli.verbose, cli.json_output) {
         eprintln!("Failed to initialize logging: {}", e);
         return exit_codes::UNEXPECTED_FAILURE;
     }
 
-    // Create tokio runtime for async commands
-    let rt = match tokio::runtime::Runtime::new() {
+    let rt = match Runtime::new() {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("Failed to create runtime: {}", e);
@@ -75,72 +63,82 @@ fn run(log_path: &Path) -> i32 {
         }
     };
 
-    match cli.command {
-        Some(Commands::Usage(args)) => rt.block_on(async {
-            match cli::usage::run(args).await {
-                Ok(()) => exit_codes::SUCCESS,
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    categorize_error(&e)
-                }
-            }
-        }),
-        Some(Commands::Cost(args)) => rt.block_on(async {
-            match cli::cost::run(args).await {
-                Ok(()) => exit_codes::SUCCESS,
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    categorize_error(&e)
-                }
-            }
-        }),
-        Some(Commands::Serve(args)) => rt.block_on(async {
-            match cli::serve::run(args).await {
-                Ok(()) => exit_codes::SUCCESS,
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    exit_codes::UNEXPECTED_FAILURE
-                }
-            }
-        }),
-        Some(Commands::Autostart(args)) => rt.block_on(async {
-            match cli::autostart::run(args).await {
-                Ok(()) => exit_codes::SUCCESS,
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    exit_codes::UNEXPECTED_FAILURE
-                }
-            }
-        }),
-        Some(Commands::Account(args)) => rt.block_on(async {
-            match cli::account::run(args).await {
-                Ok(()) => exit_codes::SUCCESS,
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    exit_codes::UNEXPECTED_FAILURE
-                }
-            }
-        }),
-        Some(Commands::Config(args)) => rt.block_on(async {
-            match cli::config::run(args).await {
-                Ok(()) => exit_codes::SUCCESS,
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    exit_codes::UNEXPECTED_FAILURE
-                }
-            }
-        }),
-        None => {
-            // The egui menubar shell has been retired; the desktop UI lives in
-            // apps/desktop-tauri. The CLI binary now requires an explicit subcommand.
-            eprintln!(
-                "codexbar is now CLI-only. Run a subcommand (e.g. `codexbar usage -p claude`) \
-                 or launch the Tauri desktop shell via `apps/desktop-tauri`.\n\
-                 Use `codexbar --help` for the full list of subcommands."
-            );
-            exit_codes::USAGE_ERROR
+    dispatch_command(&rt, cli.command)
+}
+
+fn startup_log() -> String {
+    let mut log = format!("Starting at {:?}\n", std::time::SystemTime::now());
+
+    if let Some(wsl_log) = wsl_log() {
+        log.push_str(&wsl_log);
+    }
+
+    log.push_str(&format!("Args: {:?}\n", launch_arg_summary()));
+    log
+}
+
+fn wsl_log() -> Option<String> {
+    if !wsl::is_wsl() {
+        return None;
+    }
+
+    let mut log = "Running inside WSL\n".to_string();
+    if let Some(info) = wsl::get_wsl_info() {
+        log.push_str(&format!("  Distro: {}\n", info.distro_name));
+        log.push_str(&format!("  Drive mount: {:?}\n", info.drive_mount));
+    }
+
+    Some(log)
+}
+
+fn dispatch_command(rt: &Runtime, command: Option<Commands>) -> i32 {
+    match command {
+        Some(Commands::Usage(args)) => run_categorized(rt, cli::usage::run(args)),
+        Some(Commands::Cost(args)) => run_categorized(rt, cli::cost::run(args)),
+        Some(Commands::Serve(args)) => run_unexpected(rt, cli::serve::run(args)),
+        Some(Commands::Autostart(args)) => run_unexpected(rt, cli::autostart::run(args)),
+        Some(Commands::Account(args)) => run_unexpected(rt, cli::account::run(args)),
+        Some(Commands::Config(args)) => run_unexpected(rt, cli::config::run(args)),
+        None => missing_subcommand(),
+    }
+}
+
+fn run_categorized<F>(rt: &Runtime, future: F) -> i32
+where
+    F: Future<Output = anyhow::Result<()>>,
+{
+    run_command(rt, future, categorize_error)
+}
+
+fn run_unexpected<F>(rt: &Runtime, future: F) -> i32
+where
+    F: Future<Output = anyhow::Result<()>>,
+{
+    run_command(rt, future, |_| exit_codes::UNEXPECTED_FAILURE)
+}
+
+fn run_command<F>(rt: &Runtime, future: F, error_code: fn(&anyhow::Error) -> i32) -> i32
+where
+    F: Future<Output = anyhow::Result<()>>,
+{
+    match rt.block_on(future) {
+        Ok(()) => exit_codes::SUCCESS,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            error_code(&e)
         }
     }
+}
+
+fn missing_subcommand() -> i32 {
+    // The egui menubar shell has been retired; the desktop UI lives in
+    // apps/desktop-tauri. The CLI binary now requires an explicit subcommand.
+    eprintln!(
+        "codexbar is now CLI-only. Run a subcommand (e.g. `codexbar usage -p claude`) \
+         or launch the Tauri desktop shell via `apps/desktop-tauri`.\n\
+         Use `codexbar --help` for the full list of subcommands."
+    );
+    exit_codes::USAGE_ERROR
 }
 
 /// Categorize an error into the appropriate exit code
