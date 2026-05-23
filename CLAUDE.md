@@ -171,7 +171,7 @@ Things this fork may want to customize relative to upstream:
 2. **Default float bar enabled** — small always-on-top usage strip is more useful than a hidden tray icon.
 3. **Provider visibility defaults** — pre-enable Claude / Codex / Gemini / Ollama so first-run shows them.
 
-When making any of these, document the patch in `docs/` (create `docs/owner-patches.md` if needed) so they survive upstream-sync merges.
+When making any of these, document the patch in **`OWNER_PATCHES.md`** at the repo root (not under `docs/` — upstream gitignores that directory). The file already exists with the three planned patches scaffolded.
 
 ---
 
