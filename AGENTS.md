@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+> **Fork-owner note (robertgroarke):** This file is the upstream contributor guide — preserved intact to reduce merge conflicts with `Finesssee/Win-CodexBar`. For my personal workflow conventions (full-agent-mode, `master` vs `main` branch rules, owner-specific patches, Windows-specific paths), see **`CLAUDE.md`** in the repo root. Read CLAUDE.md FIRST, then this file.
+
 ## Current Project State
 - This branch launches the Tauri desktop shell by default (`apps/desktop-tauri/src-tauri`), while
   `rust/` remains the shared backend/domain crate and standalone CLI.
