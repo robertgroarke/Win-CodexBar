@@ -14,7 +14,7 @@ fn test_settings_default() {
 #[test]
 fn float_bar_defaults_are_safe() {
     let settings = Settings::default();
-    assert!(!settings.float_bar_enabled);
+    assert!(settings.float_bar_enabled); // Owner patch P-002: float bar on by default
     assert_eq!(settings.float_bar_opacity, 80);
     assert_eq!(settings.float_bar_orientation, "horizontal");
     assert!(!settings.float_bar_click_through);

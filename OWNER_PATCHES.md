@@ -31,17 +31,17 @@ Local modifications applied on top of `Finesssee/Win-CodexBar` upstream. Tracked
 
 ## P-002 — Default `float_bar = true`
 
-**Status:** planned
-**Target files:** same as P-001 (settings defaults) plus likely `rust/src/tray/render.rs` for any first-position logic
-**Last verified commit:** _none yet_
+**Status:** applied
+**Target files:** `rust/src/settings.rs` (`Settings::default()` at line 281), `rust/src/settings/tests.rs` (`float_bar_defaults_are_safe` at line 17)
+**Last verified commit:** _set on next commit_
 
 **What:** Pre-enable the float bar so a small always-on-top usage strip is visible from first launch. Position defaults to top-right (matches existing `window_geometry.json` default of `x: 1100, y: 8, w: 112, h: 24`).
 
 **Why:** The float bar is the lowest-friction way to see provider usage without opening the full dashboard. It complements P-001 — dashboard on boot, float bar always present after dismiss.
 
-**How to apply:** find the default for `float_bar` / `floatBar` in settings construction, flip to `true`. If a position default also needs setting, write `(1100, 8, 112, 24)` to match the empirical good location.
+**How to apply:** flip `float_bar_enabled: false` → `true` in `Settings::default()` at [rust/src/settings.rs:281](rust/src/settings.rs#L281), and update the matching assertion in `float_bar_defaults_are_safe` at [rust/src/settings/tests.rs:17](rust/src/settings/tests.rs#L17). Other float-bar default scalars (opacity 80, orientation "horizontal", click_through false, provider_ids empty, dark_text false) are unchanged. Tagged with an `Owner patch P-002` comment in both locations for upstream-merge visibility.
 
-**How to verify:** fresh-install path from P-001. Float bar should appear top-right without manual enable.
+**How to verify:** fresh-install path from P-001. Float bar should appear top-right without manual enable. `cargo test --manifest-path rust/Cargo.toml` should pass (all 310 tests, including `float_bar_defaults_are_safe` now asserting `true`).
 
 ---
 
@@ -76,5 +76,5 @@ When `git merge upstream/main` touches any file in any patch above:
 | ID | Status | Summary |
 |---|---|---|
 | P-001 | upstreamed | Default `start_minimized = false` (no patch needed; matches upstream) |
-| P-002 | planned | Default `float_bar = true` |
+| P-002 | applied | Default `float_bar = true` |
 | P-003 | planned | Pre-enable Claude/Codex/Gemini/Ollama |
