@@ -33,7 +33,7 @@ Local modifications applied on top of `Finesssee/Win-CodexBar` upstream. Tracked
 
 **Status:** applied
 **Target files:** `rust/src/settings.rs` (`Settings::default()` at line 281), `rust/src/settings/tests.rs` (`float_bar_defaults_are_safe` at line 17)
-**Last verified commit:** _set on next commit_
+**Last verified commit:** e093145bec4e7b454c06d7179561d8f72ade3321
 
 **What:** Pre-enable the float bar so a small always-on-top usage strip is visible from first launch. Position defaults to top-right (matches existing `window_geometry.json` default of `x: 1100, y: 8, w: 112, h: 24`).
 
