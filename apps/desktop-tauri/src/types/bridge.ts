@@ -483,6 +483,68 @@ export interface WorkAreaRect {
   height: number;
 }
 
+// ── Cockpit system stats ────────────────────────────────────────────────────
+
+export interface CpuStatsSnapshot {
+  usagePercent: number;
+  averageFrequencyMhz: number | null;
+  logicalCoreCount: number;
+  physicalCoreCount: number | null;
+  brand: string | null;
+}
+
+export interface MemoryStatsSnapshot {
+  totalBytes: number;
+  usedBytes: number;
+  availableBytes: number;
+  usedPercent: number;
+}
+
+export interface DiskStatsSnapshot {
+  name: string;
+  mountPoint: string;
+  kind: string;
+  totalBytes: number;
+  availableBytes: number;
+  usedBytes: number;
+  usedPercent: number;
+}
+
+export interface NetworkInterfaceStatsSnapshot {
+  name: string;
+  receivedBytesPerSec: number;
+  transmittedBytesPerSec: number;
+  totalReceivedBytes: number;
+  totalTransmittedBytes: number;
+}
+
+export interface NetworkStatsSnapshot {
+  receivedBytesPerSec: number;
+  transmittedBytesPerSec: number;
+  totalReceivedBytes: number;
+  totalTransmittedBytes: number;
+  interfaces: NetworkInterfaceStatsSnapshot[];
+}
+
+export interface ProcessStatsSnapshot {
+  pid: number;
+  name: string;
+  cpuUsagePercent: number;
+  memoryBytes: number;
+  memoryPercent: number;
+}
+
+export interface SystemStatsSnapshot {
+  collectedAt: string;
+  cpu: CpuStatsSnapshot;
+  memory: MemoryStatsSnapshot;
+  disks: DiskStatsSnapshot[];
+  network: NetworkStatsSnapshot;
+  topProcessesByCpu: ProcessStatsSnapshot[];
+  topProcessesByMemory: ProcessStatsSnapshot[];
+  unavailable: string[];
+}
+
 // ── Phase 4 — event payloads ─────────────────────────────────────────
 
 /** Payload emitted for the `global-shortcut-triggered` event: the

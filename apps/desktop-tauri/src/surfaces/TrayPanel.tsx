@@ -235,6 +235,7 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
   // Settings / About / Quit render as plain text rows (no icon column).
   const footerRows: MenuFooterRow[] = [
     { icon: "↻", label: "Refresh", shortcut: "Ctrl+R", onClick: refresh },
+    { icon: "C", label: "Open Cockpit", onClick: openPopOut },
     { icon: "", label: "Settings\u2026", shortcut: "Ctrl+,", onClick: openSettings },
     { icon: "", label: "About CodexBar", onClick: openAbout },
     { icon: "", label: "Quit", shortcut: "Ctrl+Q", onClick: quitApp },

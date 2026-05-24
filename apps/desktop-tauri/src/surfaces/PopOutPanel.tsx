@@ -12,6 +12,7 @@ import MenuSurface, {
   type MenuFooterRow,
 } from "../components/MenuSurface";
 import UpdateBanner from "../components/UpdateBanner";
+import Cockpit from "./Cockpit";
 
 /** Sort: highest primary used% first, then alphabetical by name. */
 function sortProviders(
@@ -36,6 +37,20 @@ export default function PopOutPanel({
 }: {
   state: BootstrapState;
   providerId?: string;
+}) {
+  if (!providerId) {
+    return <Cockpit state={state} />;
+  }
+
+  return <ProviderPopOutPanel state={state} providerId={providerId} />;
+}
+
+function ProviderPopOutPanel({
+  state,
+  providerId,
+}: {
+  state: BootstrapState;
+  providerId: string;
 }) {
   const {
     providers,

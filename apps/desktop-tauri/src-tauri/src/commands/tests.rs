@@ -98,6 +98,7 @@ fn bootstrap_contract_lists_phase4_commands() {
         "is_remote_session",
         "get_launch_block_reason",
         "get_work_area_rect",
+        "get_system_stats",
         "play_notification_sound",
         "open_provider_dashboard",
         "trigger_provider_login",

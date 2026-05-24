@@ -60,9 +60,9 @@ impl SurfaceMode {
                 visible: true,
                 decorations: true,
                 resizable: true,
-                width: 420.0,
-                height: 680.0,
-                min_width: Some(320.0),
+                width: 760.0,
+                height: 720.0,
+                min_width: Some(420.0),
                 min_height: Some(240.0),
                 always_on_top: false,
                 blur_dismiss: false,
@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn pop_out_min_size() {
         let props = SurfaceMode::PopOut.window_properties();
-        assert_eq!(props.min_width, Some(320.0));
+        assert_eq!(props.min_width, Some(420.0));
         assert_eq!(props.min_height, Some(240.0));
     }
 }

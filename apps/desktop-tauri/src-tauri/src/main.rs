@@ -42,6 +42,7 @@ fn main() {
 
     tauri::Builder::default()
         .manage(Mutex::new(initial_state))
+        .manage(Mutex::new(commands::SystemStatsCollector::new()))
         .plugin(shortcut_bridge::plugin())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let _ =
@@ -103,6 +104,7 @@ fn main() {
             commands::is_remote_session,
             commands::get_launch_block_reason,
             commands::get_work_area_rect,
+            commands::get_system_stats,
             commands::play_notification_sound,
             commands::reanchor_tray_panel,
             commands::quit_app,

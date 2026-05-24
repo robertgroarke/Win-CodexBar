@@ -669,6 +669,10 @@ pub(crate) fn bridge_commands() -> Vec<BridgeCommandDescriptor> {
             description: "Return the current monitor's work area in physical pixels (excludes the taskbar / Dock / panel).",
         },
         BridgeCommandDescriptor {
+            id: "get_system_stats",
+            description: "Return a compact local system performance snapshot for the Cockpit surface.",
+        },
+        BridgeCommandDescriptor {
             id: "play_notification_sound",
             description: "Play the short notification chime used after refreshes.",
         },

@@ -40,6 +40,7 @@ mod settings;
 mod shortcuts;
 mod surface;
 mod system;
+mod system_stats;
 
 pub(crate) use bridge::*;
 pub use browser_import::*;
@@ -53,6 +54,7 @@ pub use settings::*;
 pub use shortcuts::*;
 pub use surface::*;
 pub use system::*;
+pub(crate) use system_stats::*;
 
 #[cfg(test)]
 mod tests;

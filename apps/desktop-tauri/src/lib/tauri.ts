@@ -22,6 +22,7 @@ import type {
   SettingsUpdate,
   SurfaceMode,
   SurfaceTargetForMode,
+  SystemStatsSnapshot,
   VisibleSurfaceMode,
   UpdateStatePayload,
   CookieSourceOption,
@@ -93,6 +94,10 @@ export function refreshProvidersIfStale(): Promise<void> {
 
 export function getCachedProviders(): Promise<ProviderUsageSnapshot[]> {
   return invoke<ProviderUsageSnapshot[]>("get_cached_providers");
+}
+
+export function getSystemStats(): Promise<SystemStatsSnapshot> {
+  return invoke<SystemStatsSnapshot>("get_system_stats");
 }
 
 export function getSafeDiagnostics(): Promise<SafeDiagnostics> {
