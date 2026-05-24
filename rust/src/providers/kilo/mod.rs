@@ -54,38 +54,20 @@ impl KiloProvider {
     }
 
     fn get_api_key(api_key: Option<&str>) -> Result<String, ProviderError> {
-        if let Some(k) = api_key
-            && !k.is_empty()
-        {
-            return Ok(k.to_string());
-        }
-
-        if let Ok(entry) = keyring::Entry::new(KILO_CREDENTIAL_TARGET, "api_key")
-            && let Ok(token) = entry.get_password()
-            && !token.is_empty()
-        {
+        if let Some(token) = direct_kilo_api_key(api_key) {
             return Ok(token);
         }
 
-        if let Ok(token) = std::env::var("KILO_API_KEY")
-            && !token.is_empty()
-        {
+        if let Some(token) = keyring_kilo_api_key() {
             return Ok(token);
         }
 
-        if let Some(home) = dirs::home_dir() {
-            let path = home.join(".local/share/kilo/auth.json");
-            if let Ok(text) = std::fs::read_to_string(&path)
-                && let Ok(json) = serde_json::from_str::<Value>(&text)
-            {
-                for key in ["apiKey", "api_key", "token"] {
-                    if let Some(v) = json.get(key).and_then(|v| v.as_str())
-                        && !v.is_empty()
-                    {
-                        return Ok(v.to_string());
-                    }
-                }
-            }
+        if let Some(token) = env_kilo_api_key() {
+            return Ok(token);
+        }
+
+        if let Some(token) = file_kilo_api_key() {
+            return Ok(token);
         }
 
         Err(ProviderError::NotInstalled(
@@ -211,6 +193,44 @@ impl KiloProvider {
 
         Self::build_snapshot(credit_blocks, kilo_pass)
     }
+}
+
+fn direct_kilo_api_key(api_key: Option<&str>) -> Option<String> {
+    api_key.filter(|key| !key.is_empty()).map(str::to_string)
+}
+
+fn keyring_kilo_api_key() -> Option<String> {
+    keyring::Entry::new(KILO_CREDENTIAL_TARGET, "api_key")
+        .ok()?
+        .get_password()
+        .ok()
+        .filter(|token| !token.is_empty())
+}
+
+fn env_kilo_api_key() -> Option<String> {
+    std::env::var("KILO_API_KEY")
+        .ok()
+        .filter(|token| !token.is_empty())
+}
+
+fn file_kilo_api_key() -> Option<String> {
+    let path = dirs::home_dir()?.join(".local/share/kilo/auth.json");
+    let text = std::fs::read_to_string(path).ok()?;
+    let json = serde_json::from_str::<Value>(&text).ok()?;
+
+    kilo_api_key_from_json(&json)
+}
+
+fn kilo_api_key_from_json(json: &Value) -> Option<String> {
+    for key in ["apiKey", "api_key", "token"] {
+        if let Some(value) = json.get(key).and_then(|v| v.as_str())
+            && !value.is_empty()
+        {
+            return Some(value.to_string());
+        }
+    }
+
+    None
 }
 
 impl Default for KiloProvider {

@@ -89,59 +89,61 @@ pub async fn check_for_updates() -> Option<UpdateInfo> {
 /// When `channel` is `UpdateChannel::Beta`, includes pre-release versions.
 /// When `channel` is `UpdateChannel::Stable`, only considers stable releases.
 pub async fn check_for_updates_with_channel(channel: UpdateChannel) -> Option<UpdateInfo> {
-    let url = match channel {
-        UpdateChannel::Beta => {
-            // For beta, we need to check all releases and find the latest (including pre-releases)
-            format!("https://api.github.com/repos/{}/releases", GITHUB_REPO)
-        }
-        UpdateChannel::Stable => {
-            // For stable, use the /latest endpoint which excludes pre-releases
-            format!(
-                "https://api.github.com/repos/{}/releases/latest",
-                GITHUB_REPO
-            )
-        }
-    };
+    let client = update_client()?;
+    let response = client.get(release_url(channel)).send().await.ok()?;
+    let release = parse_release_response(response, channel).await?;
+    let remote_version = remote_version_from_tag(&release.tag_name);
 
-    let client = reqwest::Client::builder()
-        .user_agent("CodexBar")
-        .build()
-        .ok()?;
-
-    let response = client.get(&url).send().await.ok()?;
-
-    if !response.status().is_success() {
-        tracing::debug!("GitHub API returned status: {}", response.status());
-        return None;
-    }
-
-    // Parse response based on channel
-    let release: GitHubRelease = match channel {
-        UpdateChannel::Beta => {
-            // For beta, we get an array of releases - take the first non-draft one
-            let releases: Vec<GitHubRelease> = response.json().await.ok()?;
-            releases.into_iter().find(|r| !r.draft)?
-        }
-        UpdateChannel::Stable => {
-            // For stable, we get a single release object
-            response.json().await.ok()?
-        }
-    };
-
-    // Parse version from tag (remove 'v' prefix and '-windows' suffix if present)
-    let remote_version = release
-        .tag_name
-        .trim_start_matches('v')
-        .split('-')
-        .next()
-        .unwrap_or(&release.tag_name);
-
-    // Compare versions
     if is_newer_version(remote_version, CURRENT_VERSION) {
         select_release_target(&release)
     } else {
         None
     }
+}
+
+fn release_url(channel: UpdateChannel) -> String {
+    match channel {
+        UpdateChannel::Beta => format!("https://api.github.com/repos/{}/releases", GITHUB_REPO),
+        UpdateChannel::Stable => {
+            format!(
+                "https://api.github.com/repos/{}/releases/latest",
+                GITHUB_REPO
+            )
+        }
+    }
+}
+
+fn update_client() -> Option<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent("CodexBar")
+        .build()
+        .ok()
+}
+
+async fn parse_release_response(
+    response: reqwest::Response,
+    channel: UpdateChannel,
+) -> Option<GitHubRelease> {
+    if !response.status().is_success() {
+        tracing::debug!("GitHub API returned status: {}", response.status());
+        return None;
+    }
+
+    match channel {
+        UpdateChannel::Beta => {
+            let releases: Vec<GitHubRelease> = response.json().await.ok()?;
+            releases.into_iter().find(|r| !r.draft)
+        }
+        UpdateChannel::Stable => response.json().await.ok(),
+    }
+}
+
+fn remote_version_from_tag(tag_name: &str) -> &str {
+    tag_name
+        .trim_start_matches('v')
+        .split('-')
+        .next()
+        .unwrap_or(tag_name)
 }
 
 fn select_release_target(release: &GitHubRelease) -> Option<UpdateInfo> {
@@ -254,97 +256,118 @@ pub async fn download_update(
     update_info: &UpdateInfo,
     progress_tx: watch::Sender<UpdateState>,
 ) -> Result<PathBuf, String> {
-    if !update_info.supports_auto_download() {
-        return Err("This update must be downloaded manually from the release page.".to_string());
-    }
+    validate_auto_download(update_info)?;
 
-    let download_dir =
-        get_download_dir().ok_or_else(|| "Could not determine download directory".to_string())?;
-
-    // Create download directory if it doesn't exist
-    std::fs::create_dir_all(&download_dir)
-        .map_err(|e| format!("Failed to create download directory: {}", e))?;
-
-    // Extract filename from URL or use default
-    let filename = update_info
-        .download_url
-        .split('/')
-        .next_back()
-        .unwrap_or("CodexBar-Setup.exe")
-        .to_string();
-
-    let file_path = download_dir.join(&filename);
-
-    // Start download
-    let client = reqwest::Client::builder()
-        .user_agent("CodexBar")
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
-    let response = client
-        .get(&update_info.download_url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to start download: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Download failed with status: {}",
-            response.status()
-        ));
-    }
-
-    let total_size = response.content_length().unwrap_or(0);
-
-    // Create file for writing
-    let mut file = tokio::fs::File::create(&file_path)
-        .await
-        .map_err(|e| format!("Failed to create file: {}", e))?;
-
-    use tokio::io::AsyncWriteExt;
-
-    let mut downloaded: u64 = 0;
-    let mut stream = response.bytes_stream();
-
-    use futures::StreamExt;
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Error downloading chunk: {}", e))?;
-
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| format!("Failed to write chunk: {}", e))?;
-
-        downloaded += chunk.len() as u64;
-
-        // Calculate and send progress
-        let progress = if total_size > 0 {
-            (downloaded as f32 / total_size as f32).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-
-        let _ = progress_tx.send(UpdateState::Downloading(progress));
-    }
-
-    file.flush()
-        .await
-        .map_err(|e| format!("Failed to flush file: {}", e))?;
-
-    // Verify download integrity using SHA256 checksum from release metadata
-    verify_download_hash(
-        &file_path,
-        update_info
-            .expected_sha256
-            .as_deref()
-            .ok_or_else(|| "Missing SHA256 digest for update asset".to_string())?,
-    )
-    .await?;
+    let file_path = prepare_download_path(update_info)?;
+    let response = start_download(&update_info.download_url).await?;
+    write_download_response(response, &file_path, &progress_tx).await?;
+    verify_download_hash(&file_path, expected_update_sha256(update_info)?).await?;
 
     // Signal download complete
     let _ = progress_tx.send(UpdateState::Ready(file_path.clone()));
 
     Ok(file_path)
+}
+
+fn validate_auto_download(update_info: &UpdateInfo) -> Result<(), String> {
+    if update_info.supports_auto_download() {
+        Ok(())
+    } else {
+        Err("This update must be downloaded manually from the release page.".to_string())
+    }
+}
+
+fn prepare_download_path(update_info: &UpdateInfo) -> Result<PathBuf, String> {
+    let download_dir =
+        get_download_dir().ok_or_else(|| "Could not determine download directory".to_string())?;
+
+    std::fs::create_dir_all(&download_dir)
+        .map_err(|e| format!("Failed to create download directory: {}", e))?;
+
+    Ok(download_dir.join(download_filename(&update_info.download_url)))
+}
+
+fn download_filename(download_url: &str) -> String {
+    download_url
+        .split('/')
+        .next_back()
+        .unwrap_or("CodexBar-Setup.exe")
+        .to_string()
+}
+
+fn expected_update_sha256(update_info: &UpdateInfo) -> Result<&str, String> {
+    update_info
+        .expected_sha256
+        .as_deref()
+        .ok_or_else(|| "Missing SHA256 digest for update asset".to_string())
+}
+
+fn update_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent("CodexBar")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))
+}
+
+async fn start_download(download_url: &str) -> Result<reqwest::Response, String> {
+    let response = update_http_client()?
+        .get(download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to start download: {}", e))?;
+
+    if response.status().is_success() {
+        Ok(response)
+    } else {
+        Err(format!(
+            "Download failed with status: {}",
+            response.status()
+        ))
+    }
+}
+
+async fn write_download_response(
+    response: reqwest::Response,
+    file_path: &Path,
+    progress_tx: &watch::Sender<UpdateState>,
+) -> Result<(), String> {
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let total_size = response.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut stream = response.bytes_stream();
+    let mut file = tokio::fs::File::create(file_path)
+        .await
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Error downloading chunk: {}", e))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("Failed to write chunk: {}", e))?;
+
+        downloaded += chunk.len() as u64;
+        send_download_progress(progress_tx, downloaded, total_size);
+    }
+
+    file.flush()
+        .await
+        .map_err(|e| format!("Failed to flush file: {}", e))
+}
+
+fn send_download_progress(
+    progress_tx: &watch::Sender<UpdateState>,
+    downloaded: u64,
+    total_size: u64,
+) {
+    let progress = if total_size > 0 {
+        (downloaded as f32 / total_size as f32).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    let _ = progress_tx.send(UpdateState::Downloading(progress));
 }
 
 /// Verify the SHA256 hash of a downloaded file against release metadata.

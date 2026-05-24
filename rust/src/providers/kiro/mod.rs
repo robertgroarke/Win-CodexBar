@@ -169,55 +169,15 @@ impl KiroProvider {
     fn parse_cli_output(&self, output: &str) -> Result<UsageSnapshot, ProviderError> {
         let stripped = Self::strip_ansi(output);
         let trimmed = stripped.trim();
-
-        if trimmed.is_empty() {
-            return Err(ProviderError::Parse(
-                "Empty output from kiro-cli".to_string(),
-            ));
-        }
-
+        Self::validate_cli_output(trimmed, &stripped)?;
         let lowered = stripped.to_lowercase();
-        if lowered.contains("could not retrieve usage information") {
-            return Err(ProviderError::Parse(
-                "Kiro CLI could not retrieve usage information".to_string(),
-            ));
-        }
-
         let parsed = Self::parse_usage_fields(&stripped, &lowered);
 
-        // Managed plans in new format may omit usage metrics
-        if parsed.matched_new_format
-            && parsed.is_managed_plan
-            && !parsed.matched_percent
-            && !parsed.matched_credits
-        {
-            let usage =
-                UsageSnapshot::new(RateWindow::new(0.0)).with_login_method(&parsed.plan_name);
+        if let Some(usage) = Self::usage_without_metrics(&parsed) {
             return Ok(usage);
         }
 
-        // Require at least some pattern to match
-        if !parsed.matched_percent && !parsed.matched_credits {
-            if parsed.matched_new_format || parsed.plan_name != "Kiro" {
-                // We got a plan name but no usage data
-                let usage =
-                    UsageSnapshot::new(RateWindow::new(0.0)).with_login_method(&parsed.plan_name);
-                return Ok(usage);
-            }
-            // If we have the CLI but can't parse, at least report it's installed
-            let usage =
-                UsageSnapshot::new(RateWindow::new(0.0)).with_login_method("Kiro (installed)");
-            return Ok(usage);
-        }
-
-        let primary = RateWindow::with_details(
-            parsed.credits_percent,
-            None, // monthly, no fixed window
-            parsed.reset_date,
-            None,
-        );
-
-        let mut usage = UsageSnapshot::new(primary).with_login_method(&parsed.plan_name);
+        let mut usage = Self::usage_with_metrics(&parsed);
         usage = Self::apply_overage_windows(usage, &parsed);
 
         if let Some(bonus) = parsed.bonus_window {
@@ -225,6 +185,45 @@ impl KiroProvider {
         }
 
         Ok(usage)
+    }
+
+    fn validate_cli_output(trimmed: &str, stripped: &str) -> Result<(), ProviderError> {
+        if trimmed.is_empty() {
+            return Err(ProviderError::Parse(
+                "Empty output from kiro-cli".to_string(),
+            ));
+        }
+
+        if stripped
+            .to_lowercase()
+            .contains("could not retrieve usage information")
+        {
+            return Err(ProviderError::Parse(
+                "Kiro CLI could not retrieve usage information".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn usage_without_metrics(parsed: &KiroCliUsage) -> Option<UsageSnapshot> {
+        if parsed.matched_percent || parsed.matched_credits {
+            return None;
+        }
+
+        let method = if parsed.matched_new_format || parsed.plan_name != "Kiro" {
+            parsed.plan_name.as_str()
+        } else {
+            "Kiro (installed)"
+        };
+
+        Some(UsageSnapshot::new(RateWindow::new(0.0)).with_login_method(method))
+    }
+
+    fn usage_with_metrics(parsed: &KiroCliUsage) -> UsageSnapshot {
+        let primary =
+            RateWindow::with_details(parsed.credits_percent, None, parsed.reset_date, None);
+        UsageSnapshot::new(primary).with_login_method(&parsed.plan_name)
     }
 
     fn parse_usage_fields(stripped: &str, lowered: &str) -> KiroCliUsage {

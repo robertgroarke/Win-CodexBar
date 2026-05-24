@@ -127,41 +127,23 @@ impl JetBrainsProvider {
         //   <option name="creditLimit" value="1000" />
         // </component>
 
-        let mut used_credits = 0.0;
-        let mut credit_limit = 1000.0; // Default monthly limit
+        let quota = Self::parse_quota_values(content);
+        Ok(Self::usage_from_quota(quota))
+    }
+
+    fn parse_quota_values(content: &str) -> JetBrainsQuota {
+        let mut quota = JetBrainsQuota::default();
 
         // Simple XML parsing (not using full XML parser to avoid dependency)
-        for line in content.lines() {
-            let line = line.trim();
-
-            if (line.contains("usedCredits")
-                || line.contains("used_credits")
-                || line.contains("creditsUsed"))
-                && let Some(value) = Self::extract_xml_value(line)
-            {
-                used_credits = value;
-            }
-
-            if (line.contains("creditLimit")
-                || line.contains("credit_limit")
-                || line.contains("creditsLimit")
-                || line.contains("monthlyLimit"))
-                && let Some(value) = Self::extract_xml_value(line)
-            {
-                credit_limit = value;
-            }
+        for line in content.lines().map(str::trim) {
+            quota.apply_xml_line(line);
         }
 
-        let used_percent = if credit_limit > 0.0 {
-            (used_credits / credit_limit) * 100.0
-        } else {
-            0.0
-        };
+        quota
+    }
 
-        let usage =
-            UsageSnapshot::new(RateWindow::new(used_percent)).with_login_method("JetBrains AI");
-
-        Ok(usage)
+    fn usage_from_quota(quota: JetBrainsQuota) -> UsageSnapshot {
+        UsageSnapshot::new(RateWindow::new(quota.used_percent())).with_login_method("JetBrains AI")
     }
 
     /// Extract numeric value from XML attribute
@@ -180,6 +162,57 @@ impl JetBrainsProvider {
     /// Check if JetBrains AI is installed
     fn is_installed() -> bool {
         Self::find_ai_config_file().is_some()
+    }
+}
+
+struct JetBrainsQuota {
+    used_credits: f64,
+    credit_limit: f64,
+}
+
+impl Default for JetBrainsQuota {
+    fn default() -> Self {
+        Self {
+            used_credits: 0.0,
+            credit_limit: 1000.0,
+        }
+    }
+}
+
+impl JetBrainsQuota {
+    fn apply_xml_line(&mut self, line: &str) {
+        if Self::is_used_credits_line(line)
+            && let Some(value) = JetBrainsProvider::extract_xml_value(line)
+        {
+            self.used_credits = value;
+        }
+
+        if Self::is_credit_limit_line(line)
+            && let Some(value) = JetBrainsProvider::extract_xml_value(line)
+        {
+            self.credit_limit = value;
+        }
+    }
+
+    fn is_used_credits_line(line: &str) -> bool {
+        line.contains("usedCredits")
+            || line.contains("used_credits")
+            || line.contains("creditsUsed")
+    }
+
+    fn is_credit_limit_line(line: &str) -> bool {
+        line.contains("creditLimit")
+            || line.contains("credit_limit")
+            || line.contains("creditsLimit")
+            || line.contains("monthlyLimit")
+    }
+
+    fn used_percent(&self) -> f64 {
+        if self.credit_limit > 0.0 {
+            (self.used_credits / self.credit_limit) * 100.0
+        } else {
+            0.0
+        }
     }
 }
 

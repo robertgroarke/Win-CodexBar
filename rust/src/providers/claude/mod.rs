@@ -123,6 +123,89 @@ async fn run_claude_trust_preflight(
     .await
 }
 
+fn resolve_claude_cli_path() -> Result<std::path::PathBuf, ProviderError> {
+    which_claude().ok_or_else(|| {
+        ProviderError::NotInstalled(
+            "Claude CLI not found. Install from https://docs.claude.ai/claude-code".to_string(),
+        )
+    })
+}
+
+async fn fetch_claude_cli_usage_text(
+    claude_path: std::path::PathBuf,
+) -> Result<String, ProviderError> {
+    let probe_dir = claude_usage_probe_dir()?;
+    let combined = run_claude_usage_pty_probe(claude_path.clone(), probe_dir.clone()).await?;
+
+    rerun_claude_usage_after_trust_prompt(claude_path, probe_dir, combined).await
+}
+
+async fn rerun_claude_usage_after_trust_prompt(
+    claude_path: std::path::PathBuf,
+    probe_dir: std::path::PathBuf,
+    combined: String,
+) -> Result<String, ProviderError> {
+    if !is_workspace_trust_prompt(&strip_ansi(&combined).to_lowercase()) {
+        return Ok(combined);
+    }
+
+    run_claude_trust_preflight(claude_path.clone(), probe_dir.clone()).await?;
+    run_claude_usage_pty_probe(claude_path, probe_dir).await
+}
+
+fn claude_cli_error_from_output(output: &str) -> Option<ProviderError> {
+    let lowered = output.to_lowercase();
+    claude_cli_auth_error(&lowered).or_else(|| claude_cli_environment_error(&lowered))
+}
+
+fn claude_cli_auth_error(lowered: &str) -> Option<ProviderError> {
+    if claude_output_requires_login(lowered) {
+        return Some(ProviderError::AuthRequired);
+    }
+    if lowered.contains("token expired") || lowered.contains("token_expired") {
+        return Some(ProviderError::OAuth(
+            "Token expired. Run `claude login` to refresh.".to_string(),
+        ));
+    }
+    if lowered.contains("authentication_error") {
+        return Some(ProviderError::OAuth(
+            "Authentication error. Run `claude login`.".to_string(),
+        ));
+    }
+
+    None
+}
+
+fn claude_output_requires_login(lowered: &str) -> bool {
+    lowered.contains("not logged in") || lowered.contains("login required")
+}
+
+fn claude_cli_environment_error(lowered: &str) -> Option<ProviderError> {
+    if lowered.contains("requires git-bash") {
+        return Some(ProviderError::Other(
+            "Claude CLI requires Git Bash on Windows. Install Git for Windows or set \
+             CLAUDE_CODE_GIT_BASH_PATH to your bash.exe path."
+                .to_string(),
+        ));
+    }
+    if lowered.contains("running scripts is disabled") {
+        return Some(ProviderError::Other(
+            "Claude CLI could not start because PowerShell script execution is disabled. \
+             Use claude.cmd or adjust the execution policy."
+                .to_string(),
+        ));
+    }
+    if lowered.contains("cannot run a document in the middle of a pipeline") {
+        return Some(ProviderError::Other(
+            "Claude CLI resolved to a Unix shell script on Windows. Reinstall Claude Code or \
+             ensure claude.cmd is first on PATH."
+                .to_string(),
+        ));
+    }
+
+    None
+}
+
 async fn run_claude_pty_probe(
     claude_path: std::path::PathBuf,
     working_directory: std::path::PathBuf,
@@ -171,31 +254,7 @@ impl Provider for ClaudeProvider {
 
     async fn fetch_usage(&self, ctx: &FetchContext) -> Result<ProviderFetchResult, ProviderError> {
         match ctx.source_mode {
-            SourceMode::Auto => {
-                let mut failures = Vec::new();
-
-                if self.admin_fetcher.has_credentials(ctx) {
-                    match self.fetch_via_admin_api(ctx).await {
-                        Ok(result) => return Ok(result),
-                        Err(error) => failures.push(("Admin API", error)),
-                    }
-                }
-                match self.fetch_via_web(ctx).await {
-                    Ok(result) => return Ok(result),
-                    Err(error) => failures.push(("Web", error)),
-                }
-                match self.fetch_via_oauth(ctx).await {
-                    Ok(result) => return Ok(result),
-                    Err(error) => failures.push(("OAuth", error)),
-                }
-                match self.fetch_via_cli(ctx).await {
-                    Ok(result) => Ok(result),
-                    Err(error) => {
-                        failures.push(("CLI", error));
-                        Err(claude_auto_fetch_error(failures))
-                    }
-                }
-            }
+            SourceMode::Auto => self.fetch_via_auto(ctx).await,
             SourceMode::OAuth => self.fetch_via_oauth(ctx).await,
             SourceMode::Web => self.fetch_via_web(ctx).await,
             SourceMode::Cli => self.fetch_via_cli(ctx).await,
@@ -229,6 +288,50 @@ impl Provider for ClaudeProvider {
 }
 
 impl ClaudeProvider {
+    async fn fetch_via_auto(
+        &self,
+        ctx: &FetchContext,
+    ) -> Result<ProviderFetchResult, ProviderError> {
+        let mut failures = Vec::new();
+
+        if let Some(result) = self.try_auto_admin_api(ctx, &mut failures).await {
+            return Ok(result);
+        }
+
+        if let Some(result) =
+            record_auto_source(&mut failures, "Web", self.fetch_via_web(ctx).await)
+        {
+            return Ok(result);
+        }
+
+        if let Some(result) =
+            record_auto_source(&mut failures, "OAuth", self.fetch_via_oauth(ctx).await)
+        {
+            return Ok(result);
+        }
+
+        if let Some(result) =
+            record_auto_source(&mut failures, "CLI", self.fetch_via_cli(ctx).await)
+        {
+            return Ok(result);
+        }
+
+        Err(claude_auto_fetch_error(failures))
+    }
+
+    async fn try_auto_admin_api(
+        &self,
+        ctx: &FetchContext,
+        failures: &mut Vec<(&'static str, ProviderError)>,
+    ) -> Option<ProviderFetchResult> {
+        self.admin_fetcher
+            .has_credentials(ctx)
+            .then(|| async { self.fetch_via_admin_api(ctx).await })?
+            .await
+            .map_err(|error| failures.push(("Admin API", error)))
+            .ok()
+    }
+
     async fn fetch_via_oauth(
         &self,
         ctx: &FetchContext,
@@ -277,60 +380,13 @@ impl ClaudeProvider {
     ) -> Result<ProviderFetchResult, ProviderError> {
         tracing::debug!("Attempting CLI probe for Claude");
 
-        // Check if claude CLI exists
-        let claude_path = which_claude().ok_or_else(|| {
-            ProviderError::NotInstalled(
-                "Claude CLI not found. Install from https://docs.claude.ai/claude-code".to_string(),
-            )
-        })?;
+        let claude_path = resolve_claude_cli_path()?;
+        let combined = fetch_claude_cli_usage_text(claude_path).await?;
 
-        let probe_dir = claude_usage_probe_dir()?;
-        let mut combined =
-            run_claude_usage_pty_probe(claude_path.clone(), probe_dir.clone()).await?;
-
-        if is_workspace_trust_prompt(&strip_ansi(&combined).to_lowercase()) {
-            run_claude_trust_preflight(claude_path.clone(), probe_dir.clone()).await?;
-            combined = run_claude_usage_pty_probe(claude_path, probe_dir).await?;
+        if let Some(error) = claude_cli_error_from_output(&combined) {
+            return Err(error);
         }
 
-        // Check for common error conditions
-        let lowered = combined.to_lowercase();
-        if lowered.contains("not logged in") || lowered.contains("login required") {
-            return Err(ProviderError::AuthRequired);
-        }
-        if lowered.contains("token expired") || lowered.contains("token_expired") {
-            return Err(ProviderError::OAuth(
-                "Token expired. Run `claude login` to refresh.".to_string(),
-            ));
-        }
-        if lowered.contains("authentication_error") {
-            return Err(ProviderError::OAuth(
-                "Authentication error. Run `claude login`.".to_string(),
-            ));
-        }
-        if lowered.contains("requires git-bash") {
-            return Err(ProviderError::Other(
-                "Claude CLI requires Git Bash on Windows. Install Git for Windows or set \
-                 CLAUDE_CODE_GIT_BASH_PATH to your bash.exe path."
-                    .to_string(),
-            ));
-        }
-        if lowered.contains("running scripts is disabled") {
-            return Err(ProviderError::Other(
-                "Claude CLI could not start because PowerShell script execution is disabled. \
-                 Use claude.cmd or adjust the execution policy."
-                    .to_string(),
-            ));
-        }
-        if lowered.contains("cannot run a document in the middle of a pipeline") {
-            return Err(ProviderError::Other(
-                "Claude CLI resolved to a Unix shell script on Windows. Reinstall Claude Code or \
-                 ensure claude.cmd is first on PATH."
-                    .to_string(),
-            ));
-        }
-
-        // Parse the usage output
         self.parse_cli_output(&combined)
     }
 
@@ -462,6 +518,14 @@ impl ClaudeProvider {
 
         Ok(ProviderFetchResult::new(usage, "cli"))
     }
+}
+
+fn record_auto_source(
+    failures: &mut Vec<(&'static str, ProviderError)>,
+    source: &'static str,
+    result: Result<ProviderFetchResult, ProviderError>,
+) -> Option<ProviderFetchResult> {
+    result.map_err(|error| failures.push((source, error))).ok()
 }
 
 fn claude_auto_fetch_error(failures: Vec<(&'static str, ProviderError)>) -> ProviderError {

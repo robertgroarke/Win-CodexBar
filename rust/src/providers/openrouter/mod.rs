@@ -13,6 +13,8 @@ use crate::core::{
 
 /// OpenRouter API base URL
 const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1/auth";
+const OPENROUTER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const OPENROUTER_KEY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Windows Credential Manager target for OpenRouter API token
 const OPENROUTER_CREDENTIAL_TARGET: &str = "codexbar-openrouter";
@@ -116,13 +118,28 @@ impl OpenRouterProvider {
     /// Fetch usage from OpenRouter API
     async fn fetch_usage_api(&self, ctx: &FetchContext) -> Result<UsageSnapshot, ProviderError> {
         let api_key = Self::get_api_token(ctx.api_key.as_deref())?;
+        let client = Self::build_client(OPENROUTER_TIMEOUT)?;
+        let credits = Self::fetch_credits(&client, &api_key).await?;
+        let mut usage = Self::build_credits_usage(&credits.data);
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+        if let Some(key_data) = Self::fetch_key_data(&api_key).await? {
+            Self::enrich_usage_with_key_data(&mut usage, key_data);
+        }
+
+        Ok(usage)
+    }
+
+    fn build_client(timeout: std::time::Duration) -> Result<reqwest::Client, ProviderError> {
+        reqwest::Client::builder()
+            .timeout(timeout)
             .build()
-            .map_err(|e| ProviderError::Other(e.to_string()))?;
+            .map_err(|e| ProviderError::Other(e.to_string()))
+    }
 
-        // Fetch credits (primary endpoint)
+    async fn fetch_credits(
+        client: &reqwest::Client,
+        api_key: &str,
+    ) -> Result<CreditsResponse, ProviderError> {
         let credits_url = format!("{}/credits", OPENROUTER_API_BASE);
         let resp = client
             .get(&credits_url)
@@ -142,68 +159,105 @@ impl OpenRouterProvider {
             )));
         }
 
-        let credits: CreditsResponse = resp.json().await.map_err(|e| {
-            ProviderError::Parse(format!("Failed to parse credits response: {}", e))
-        })?;
+        resp.json()
+            .await
+            .map_err(|e| ProviderError::Parse(format!("Failed to parse credits response: {}", e)))
+    }
 
-        let balance = credits.data.balance();
-        let used_percent = credits.data.used_percent();
-
-        let mut primary = RateWindow::new(used_percent);
+    fn build_credits_usage(credits: &CreditsData) -> UsageSnapshot {
+        let balance = credits.balance();
+        let mut primary = RateWindow::new(credits.used_percent());
         primary.reset_description = Some(format!("${:.2} remaining", balance));
 
-        let mut usage =
-            UsageSnapshot::new(primary).with_login_method(format!("${:.2} balance", balance));
+        UsageSnapshot::new(primary).with_login_method(format!("${:.2} balance", balance))
+    }
 
-        // Try to enrich with /key endpoint data (optional, short timeout)
+    async fn fetch_key_data(api_key: &str) -> Result<Option<KeyData>, ProviderError> {
+        let key_client = Self::build_client(OPENROUTER_KEY_TIMEOUT)?;
+        let resp = Self::send_key_request(&key_client, api_key).await;
+
+        let Ok(key_resp) = resp else {
+            return Ok(None);
+        };
+
+        if !key_resp.status().is_success() {
+            return Ok(None);
+        }
+
+        Ok(key_resp
+            .json::<KeyResponse>()
+            .await
+            .map(|key_response| key_response.data)
+            .ok())
+    }
+
+    async fn send_key_request(
+        client: &reqwest::Client,
+        api_key: &str,
+    ) -> Result<reqwest::Response, reqwest::Error> {
         let key_url = format!("{}/key", OPENROUTER_API_BASE);
-        let key_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-            .map_err(|e| ProviderError::Other(e.to_string()))?;
-
-        if let Ok(key_resp) = key_client
+        client
             .get(&key_url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Accept", "application/json")
             .send()
             .await
-            && key_resp.status().is_success()
-            && let Ok(key_response) = key_resp.json::<KeyResponse>().await
-        {
-            let key_data = key_response.data;
-            if let (Some(limit), Some(key_usage)) = (key_data.limit, key_data.usage)
-                && limit > 0.0
-            {
-                // If the key has per-key limits, show them as secondary
-                let key_percent = ((key_usage / limit) * 100.0).clamp(0.0, 100.0);
-                let key_desc = format!("${:.2}/${:.2} key quota", key_usage, limit);
-                let mut key_window = RateWindow::new(key_percent);
-                key_window.reset_description = Some(key_desc);
-                usage = usage.with_secondary(key_window);
-            }
+    }
 
-            if let Some(daily) = key_data.usage_daily {
-                let mut daily_window = RateWindow::new(0.0);
-                daily_window.reset_description = Some(format!("${daily:.2} today"));
-                usage = usage.with_extra_rate_window("daily-spend", "Daily spend", daily_window);
-            }
+    fn enrich_usage_with_key_data(usage: &mut UsageSnapshot, key_data: KeyData) {
+        Self::add_key_quota(usage, &key_data);
+        Self::add_spend_window(
+            usage,
+            key_data.usage_daily,
+            "daily-spend",
+            "Daily spend",
+            "today",
+        );
+        Self::add_spend_window(
+            usage,
+            key_data.usage_weekly,
+            "weekly-spend",
+            "Weekly spend",
+            "this week",
+        );
+        Self::add_spend_window(
+            usage,
+            key_data.usage_monthly,
+            "monthly-spend",
+            "Monthly spend",
+            "this month",
+        );
+    }
 
-            if let Some(weekly) = key_data.usage_weekly {
-                let mut weekly_window = RateWindow::new(0.0);
-                weekly_window.reset_description = Some(format!("${weekly:.2} this week"));
-                usage = usage.with_extra_rate_window("weekly-spend", "Weekly spend", weekly_window);
-            }
+    fn add_key_quota(usage: &mut UsageSnapshot, key_data: &KeyData) {
+        let (Some(limit), Some(key_usage)) = (key_data.limit, key_data.usage) else {
+            return;
+        };
 
-            if let Some(monthly) = key_data.usage_monthly {
-                let mut monthly_window = RateWindow::new(0.0);
-                monthly_window.reset_description = Some(format!("${monthly:.2} this month"));
-                usage =
-                    usage.with_extra_rate_window("monthly-spend", "Monthly spend", monthly_window);
-            }
+        if limit <= 0.0 {
+            return;
         }
 
-        Ok(usage)
+        let key_percent = ((key_usage / limit) * 100.0).clamp(0.0, 100.0);
+        let mut key_window = RateWindow::new(key_percent);
+        key_window.reset_description = Some(format!("${:.2}/${:.2} key quota", key_usage, limit));
+        *usage = usage.clone().with_secondary(key_window);
+    }
+
+    fn add_spend_window(
+        usage: &mut UsageSnapshot,
+        value: Option<f64>,
+        id: &'static str,
+        label: &'static str,
+        period: &'static str,
+    ) {
+        let Some(spend) = value else {
+            return;
+        };
+
+        let mut window = RateWindow::new(0.0);
+        window.reset_description = Some(format!("${spend:.2} {period}"));
+        *usage = usage.clone().with_extra_rate_window(id, label, window);
     }
 }
 

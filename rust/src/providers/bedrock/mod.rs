@@ -143,73 +143,16 @@ impl BedrockProvider {
         let mut next_page_token: Option<String> = None;
 
         loop {
-            let mut body = json!({
-                "TimePeriod": {
-                    "Start": start_date,
-                    "End": end_date,
-                },
-                "Granularity": "MONTHLY",
-                "Metrics": ["UnblendedCost"],
-                "GroupBy": [
-                    { "Type": "DIMENSION", "Key": "SERVICE" }
-                ],
-            });
-            if let Some(token) = &next_page_token {
-                body["NextPageToken"] = Value::String(token.clone());
-            }
-
-            let body_bytes = serde_json::to_vec(&body)
-                .map_err(|e| ProviderError::Other(format!("Bedrock request build failed: {e}")))?;
-            let body_hash = sha256_hex(&body_bytes);
-            let now = Utc::now();
-            let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
-            let date_stamp = now.format("%Y%m%d").to_string();
-            let authorization = sign_authorization(
-                credentials,
-                &date_stamp,
-                &amz_date,
-                &body_hash,
-                COST_EXPLORER_URL,
-                &body_bytes,
-            )?;
-
-            let mut request = self
-                .client
-                .post(COST_EXPLORER_URL)
-                .header("Content-Type", "application/x-amz-json-1.1")
-                .header("Host", "ce.us-east-1.amazonaws.com")
-                .header("X-Amz-Target", COST_EXPLORER_TARGET)
-                .header("X-Amz-Date", amz_date)
-                .header("x-amz-content-sha256", body_hash)
-                .header("Authorization", authorization);
-            if let Some(token) = &credentials.session_token {
-                request = request.header("X-Amz-Security-Token", token);
-            }
-
-            let response = request.body(body_bytes).send().await?;
-            let status = response.status();
-            let text = response.text().await?;
-
-            if status.as_u16() == 401 || status.as_u16() == 403 {
-                return Err(ProviderError::AuthRequired);
-            }
-            if !status.is_success() {
-                return Err(ProviderError::Other(format!(
-                    "AWS Cost Explorer returned {}: {}",
-                    status,
-                    sanitized_body(&text)
-                )));
-            }
-
-            let page: Value = serde_json::from_str(&text).map_err(|e| {
-                ProviderError::Parse(format!("Failed to parse AWS Cost Explorer response: {e}"))
-            })?;
+            let page = self
+                .fetch_cost_page(
+                    credentials,
+                    &start_date,
+                    &end_date,
+                    next_page_token.as_deref(),
+                )
+                .await?;
             total += parse_bedrock_cost(&page);
-            next_page_token = page
-                .get("NextPageToken")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .filter(|s| !s.trim().is_empty());
+            next_page_token = extract_next_page_token(&page);
 
             if next_page_token.is_none() {
                 break;
@@ -217,6 +160,58 @@ impl BedrockProvider {
         }
 
         Ok(total)
+    }
+
+    async fn fetch_cost_page(
+        &self,
+        credentials: &AwsCredentials,
+        start_date: &str,
+        end_date: &str,
+        next_page_token: Option<&str>,
+    ) -> Result<Value, ProviderError> {
+        let body_bytes = cost_request_body(start_date, end_date, next_page_token)?;
+        let body_hash = sha256_hex(&body_bytes);
+        let now = Utc::now();
+        let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+        let date_stamp = now.format("%Y%m%d").to_string();
+        let authorization = sign_authorization(
+            credentials,
+            &date_stamp,
+            &amz_date,
+            &body_hash,
+            COST_EXPLORER_URL,
+            &body_bytes,
+        )?;
+
+        let response = self
+            .signed_cost_request(credentials, amz_date, body_hash, authorization)
+            .body(body_bytes)
+            .send()
+            .await?;
+        parse_cost_response(response).await
+    }
+
+    fn signed_cost_request(
+        &self,
+        credentials: &AwsCredentials,
+        amz_date: String,
+        body_hash: String,
+        authorization: String,
+    ) -> reqwest::RequestBuilder {
+        let request = self
+            .client
+            .post(COST_EXPLORER_URL)
+            .header("Content-Type", "application/x-amz-json-1.1")
+            .header("Host", "ce.us-east-1.amazonaws.com")
+            .header("X-Amz-Target", COST_EXPLORER_TARGET)
+            .header("X-Amz-Date", amz_date)
+            .header("x-amz-content-sha256", body_hash)
+            .header("Authorization", authorization);
+
+        match &credentials.session_token {
+            Some(token) => request.header("X-Amz-Security-Token", token),
+            None => request,
+        }
     }
 
     async fn fetch_via_api(
@@ -299,6 +294,57 @@ impl Provider for BedrockProvider {
     fn available_sources(&self) -> Vec<SourceMode> {
         vec![SourceMode::Auto, SourceMode::OAuth]
     }
+}
+
+fn cost_request_body(
+    start_date: &str,
+    end_date: &str,
+    next_page_token: Option<&str>,
+) -> Result<Vec<u8>, ProviderError> {
+    let mut body = json!({
+        "TimePeriod": {
+            "Start": start_date,
+            "End": end_date,
+        },
+        "Granularity": "MONTHLY",
+        "Metrics": ["UnblendedCost"],
+        "GroupBy": [
+            { "Type": "DIMENSION", "Key": "SERVICE" }
+        ],
+    });
+    if let Some(token) = next_page_token {
+        body["NextPageToken"] = Value::String(token.to_string());
+    }
+
+    serde_json::to_vec(&body)
+        .map_err(|e| ProviderError::Other(format!("Bedrock request build failed: {e}")))
+}
+
+async fn parse_cost_response(response: reqwest::Response) -> Result<Value, ProviderError> {
+    let status = response.status();
+    let text = response.text().await?;
+
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(ProviderError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(ProviderError::Other(format!(
+            "AWS Cost Explorer returned {}: {}",
+            status,
+            sanitized_body(&text)
+        )));
+    }
+
+    serde_json::from_str(&text).map_err(|e| {
+        ProviderError::Parse(format!("Failed to parse AWS Cost Explorer response: {e}"))
+    })
+}
+
+fn extract_next_page_token(page: &Value) -> Option<String> {
+    page.get("NextPageToken")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.trim().is_empty())
 }
 
 fn cleaned_env(key: &str) -> Option<String> {

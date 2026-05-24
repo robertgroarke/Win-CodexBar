@@ -12,8 +12,6 @@ use std::io::{BufRead, BufReader};
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Command runner configuration
@@ -139,94 +137,18 @@ impl CommandRunner {
         input: Option<&str>,
         options: &CommandOptions,
     ) -> Result<CommandResult, CommandError> {
-        // Find the binary
-        let binary_path = if Self::is_explicit_binary_path(binary) {
-            let path = PathBuf::from(binary);
-            if path.exists() {
-                path
-            } else {
-                return Err(CommandError::BinaryNotFound(binary.to_string()));
-            }
-        } else {
-            Self::which(binary).ok_or_else(|| CommandError::BinaryNotFound(binary.to_string()))?
-        };
-
-        // Build the command
-        let mut cmd = Command::new(&binary_path);
-
-        // Add extra args
-        for arg in &options.extra_args {
-            cmd.arg(arg);
-        }
-
-        // Set working directory
-        if let Some(dir) = &options.working_directory {
-            cmd.current_dir(dir);
-        }
-
-        // Set up environment
-        let mut env = std::env::vars().collect::<HashMap<_, _>>();
-        for (k, v) in &self.env_additions {
-            env.insert(k.clone(), v.clone());
-        }
-
-        // Set terminal environment
-        env.insert("TERM".to_string(), "xterm-256color".to_string());
-        env.insert("COLORTERM".to_string(), "truecolor".to_string());
-
-        for (k, v) in &env {
-            cmd.env(k, v);
-        }
-
-        // Set up stdio
-        cmd.stdin(Stdio::piped());
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
-
-        // Hide console window on Windows
-        #[cfg(windows)]
-        {
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        // Spawn the process
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| CommandError::LaunchFailed(e.to_string()))?;
+        let binary_path = Self::resolve_binary(binary)?;
+        let mut child = self.spawn_child(&binary_path, options)?;
 
         let start = Instant::now();
         let deadline = start + options.timeout;
 
-        // Handle input if provided
-        if let Some(input_text) = input
-            && let Some(stdin) = child.stdin.take()
-        {
-            use std::io::Write;
-            let mut stdin = stdin;
-            // Wait for initial delay
-            std::thread::sleep(options.initial_delay);
-            // Send input
-            let _ = stdin.write_all(input_text.as_bytes());
-            let _ = stdin.write_all(b"\n");
-            let _ = stdin.flush();
-        }
+        Self::send_initial_input(&mut child, input, options.initial_delay);
 
         // Capture output
         let output = self.capture_output(&mut child, options, deadline)?;
 
-        // Wait for process to finish (with timeout)
-        let exit_code = match child.try_wait() {
-            Ok(Some(status)) => status.code(),
-            Ok(None) => {
-                // Process still running, kill it
-                let _ = child.kill();
-                let _ = child.wait();
-                None
-            }
-            Err(_) => None,
-        };
-
+        let exit_code = Self::finish_child(&mut child);
         let timed_out = Instant::now() >= deadline && output.is_empty();
 
         Ok(CommandResult {
@@ -236,6 +158,97 @@ impl CommandRunner {
         })
     }
 
+    fn resolve_binary(binary: &str) -> Result<PathBuf, CommandError> {
+        if Self::is_explicit_binary_path(binary) {
+            return Self::resolve_explicit_binary(binary);
+        }
+
+        Self::which(binary).ok_or_else(|| CommandError::BinaryNotFound(binary.to_string()))
+    }
+
+    fn resolve_explicit_binary(binary: &str) -> Result<PathBuf, CommandError> {
+        let path = PathBuf::from(binary);
+        if path.exists() {
+            Ok(path)
+        } else {
+            Err(CommandError::BinaryNotFound(binary.to_string()))
+        }
+    }
+
+    fn spawn_child(
+        &self,
+        binary_path: &PathBuf,
+        options: &CommandOptions,
+    ) -> Result<Child, CommandError> {
+        let mut cmd = Command::new(binary_path);
+        Self::configure_command_args(&mut cmd, options);
+        self.configure_command_environment(&mut cmd);
+        Self::configure_command_stdio(&mut cmd);
+        Self::hide_windows_console(&mut cmd);
+
+        cmd.spawn()
+            .map_err(|e| CommandError::LaunchFailed(e.to_string()))
+    }
+
+    fn configure_command_args(cmd: &mut Command, options: &CommandOptions) {
+        cmd.args(&options.extra_args);
+
+        if let Some(dir) = &options.working_directory {
+            cmd.current_dir(dir);
+        }
+    }
+
+    fn configure_command_environment(&self, cmd: &mut Command) {
+        let mut env = std::env::vars().collect::<HashMap<_, _>>();
+        env.extend(self.env_additions.clone());
+        env.insert("TERM".to_string(), "xterm-256color".to_string());
+        env.insert("COLORTERM".to_string(), "truecolor".to_string());
+
+        cmd.envs(env);
+    }
+
+    fn configure_command_stdio(cmd: &mut Command) {
+        cmd.stdin(Stdio::piped());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+    }
+
+    #[cfg(windows)]
+    fn hide_windows_console(cmd: &mut Command) {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    #[cfg(not(windows))]
+    fn hide_windows_console(_cmd: &mut Command) {}
+
+    fn send_initial_input(child: &mut Child, input: Option<&str>, initial_delay: Duration) {
+        let Some(input_text) = input else {
+            return;
+        };
+        let Some(mut stdin) = child.stdin.take() else {
+            return;
+        };
+
+        use std::io::Write;
+        std::thread::sleep(initial_delay);
+        let _ = stdin.write_all(input_text.as_bytes());
+        let _ = stdin.write_all(b"\n");
+        let _ = stdin.flush();
+    }
+
+    fn finish_child(child: &mut Child) -> Option<i32> {
+        match child.try_wait() {
+            Ok(Some(status)) => status.code(),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
     /// Capture output from a running process
     fn capture_output(
         &self,
@@ -243,62 +256,72 @@ impl CommandRunner {
         options: &CommandOptions,
         deadline: Instant,
     ) -> Result<String, CommandError> {
-        let stop_flag = Arc::new(AtomicBool::new(false));
         let mut output = String::new();
         #[allow(unused_assignments)]
         let mut last_output_time = Instant::now();
-
-        // Read stdout in a separate thread
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| CommandError::IoError("Failed to capture stdout".to_string()))?;
-
-        let reader = BufReader::new(stdout);
+        let reader = Self::stdout_reader(child)?;
 
         for line_result in reader.lines() {
-            if stop_flag.load(Ordering::SeqCst) {
-                break;
-            }
-
-            if Instant::now() >= deadline {
+            if Self::past_deadline(deadline) {
                 break;
             }
 
             match line_result {
                 Ok(line) => {
-                    output.push_str(&line);
-                    output.push('\n');
+                    Self::append_output_line(&mut output, &line);
                     last_output_time = Instant::now();
 
-                    // Check stop conditions
-                    if options.stop_on_url
-                        && (line.contains("https://") || line.contains("http://"))
-                    {
+                    if Self::should_stop_after_line(&line, options) {
                         std::thread::sleep(options.settle_after_stop);
                         break;
-                    }
-
-                    for stop_substr in &options.stop_on_substrings {
-                        if line.contains(stop_substr) {
-                            std::thread::sleep(options.settle_after_stop);
-                            stop_flag.store(true, Ordering::SeqCst);
-                            break;
-                        }
                     }
                 }
                 Err(_) => break,
             }
 
-            // Check idle timeout
-            if let Some(idle_timeout) = options.idle_timeout
-                && last_output_time.elapsed() > idle_timeout
-            {
+            if Self::idle_timed_out(options.idle_timeout, last_output_time) {
                 break;
             }
         }
 
         Ok(output)
+    }
+
+    fn stdout_reader(child: &mut Child) -> Result<BufReader<impl std::io::Read>, CommandError> {
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| CommandError::IoError("Failed to capture stdout".to_string()))?;
+
+        Ok(BufReader::new(stdout))
+    }
+
+    fn past_deadline(deadline: Instant) -> bool {
+        Instant::now() >= deadline
+    }
+
+    fn append_output_line(output: &mut String, line: &str) {
+        output.push_str(line);
+        output.push('\n');
+    }
+
+    fn should_stop_after_line(line: &str, options: &CommandOptions) -> bool {
+        Self::line_has_stop_url(line, options.stop_on_url)
+            || Self::line_has_stop_substring(line, &options.stop_on_substrings)
+    }
+
+    fn line_has_stop_url(line: &str, stop_on_url: bool) -> bool {
+        stop_on_url && (line.contains("https://") || line.contains("http://"))
+    }
+
+    fn line_has_stop_substring(line: &str, stop_substrings: &[String]) -> bool {
+        stop_substrings
+            .iter()
+            .any(|stop_substr| line.contains(stop_substr))
+    }
+
+    fn idle_timed_out(idle_timeout: Option<Duration>, last_output_time: Instant) -> bool {
+        idle_timeout.is_some_and(|idle_timeout| last_output_time.elapsed() > idle_timeout)
     }
 
     /// Run a command asynchronously

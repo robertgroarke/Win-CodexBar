@@ -425,59 +425,79 @@ impl ProtoScan {
         }
         let mut i = 0;
         while i < data.len() {
-            let Some((key, next)) = read_varint(data, i) else {
+            let Some((field, wire, next)) = read_key(data, i) else {
                 break;
             };
             i = next;
-            let field = key >> 3;
-            let wire = key & 0x07;
             path.push(field);
-            match wire {
-                0 => {
-                    if let Some((value, next)) = read_varint(data, i) {
-                        self.varints.push(VarintField { value });
-                        i = next;
-                    } else {
-                        path.pop();
-                        break;
-                    }
-                }
-                2 => {
-                    if let Some((len, next)) = read_varint(data, i) {
-                        i = next;
-                        let end = i.saturating_add(len as usize);
-                        if end <= data.len() {
-                            self.scan_message(&data[i..end], path, depth + 1);
-                            i = end;
-                        } else {
-                            path.pop();
-                            break;
-                        }
-                    }
-                }
-                5 if i + 4 <= data.len() => {
-                    let bytes = [data[i], data[i + 1], data[i + 2], data[i + 3]];
-                    self.fixed32.push(Fixed32Field {
-                        path: path.clone(),
-                        value: f32::from_le_bytes(bytes),
-                        order: self.order,
-                    });
-                    self.order += 1;
-                    i += 4;
-                }
-                5 => {
-                    path.pop();
-                    break;
-                }
-                1 => i = i.saturating_add(8),
-                _ => {
-                    path.pop();
-                    break;
-                }
-            }
+            let Some(next) = self.scan_field(data, i, path, depth, wire) else {
+                path.pop();
+                break;
+            };
+            i = next;
             path.pop();
         }
     }
+
+    fn scan_field(
+        &mut self,
+        data: &[u8],
+        i: usize,
+        path: &mut Vec<u64>,
+        depth: usize,
+        wire: u64,
+    ) -> Option<usize> {
+        match wire {
+            0 => self.scan_varint(data, i),
+            2 => self.scan_length_delimited(data, i, path, depth),
+            5 => self.scan_fixed32(data, i, path),
+            1 => Some(i.saturating_add(8)),
+            _ => None,
+        }
+    }
+
+    fn scan_varint(&mut self, data: &[u8], i: usize) -> Option<usize> {
+        let (value, next) = read_varint(data, i)?;
+        self.varints.push(VarintField { value });
+        Some(next)
+    }
+
+    fn scan_length_delimited(
+        &mut self,
+        data: &[u8],
+        i: usize,
+        path: &mut Vec<u64>,
+        depth: usize,
+    ) -> Option<usize> {
+        let (len, next) = read_varint(data, i)?;
+        let start = next;
+        let end = start.saturating_add(len as usize);
+        if end <= data.len() {
+            self.scan_message(&data[start..end], path, depth + 1);
+            Some(end)
+        } else {
+            None
+        }
+    }
+
+    fn scan_fixed32(&mut self, data: &[u8], i: usize, path: &[u64]) -> Option<usize> {
+        if i + 4 > data.len() {
+            return None;
+        }
+        let bytes = [data[i], data[i + 1], data[i + 2], data[i + 3]];
+        self.fixed32.push(Fixed32Field {
+            path: path.to_vec(),
+            value: f32::from_le_bytes(bytes),
+            order: self.order,
+        });
+        self.order += 1;
+        Some(i + 4)
+    }
+}
+
+fn read_key(data: &[u8], i: usize) -> Option<(u64, u64, usize)> {
+    let (key, next) = read_varint(data, i)?;
+    Some((key >> 3, key & 0x07, next))
 }
 
 fn read_varint(data: &[u8], mut i: usize) -> Option<(u64, usize)> {
